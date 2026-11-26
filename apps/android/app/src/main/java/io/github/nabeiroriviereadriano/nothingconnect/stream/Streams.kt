@@ -100,6 +100,9 @@ object Streams {
 
     val pcAudioActive: Boolean get() = pcAudio != null
 
+    /** PC dont l'écran étendu est ouvert sur ce téléphone (même en arrière-plan), sinon null. */
+    val displayPeer = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
     /** Demande au PC de diffuser son son vers ce téléphone. */
     fun requestPcAudio(peer: String) {
         Core.send(peer, JSONObject().put("t", "stream_request").put("kind", "pc_audio").put("params", JSONObject()))

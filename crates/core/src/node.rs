@@ -70,6 +70,8 @@ pub(crate) struct Inner {
     pub listen_addr: Mutex<Option<SocketAddr>>,
     pub stopping: AtomicBool,
     pub wake_reconnect: Notify,
+    /// Sondage du câble USB en cours (voir `Node::cable_hint`).
+    pub cable_probe: AtomicBool,
     pub refused: Mutex<std::collections::HashSet<String>>,
     /// Un flux temps réel est actif (la plateforme le signale) : pas de bascule de liaison.
     pub streaming: AtomicBool,
@@ -157,6 +159,7 @@ impl Node {
             listen_addr: Mutex::new(None),
             stopping: AtomicBool::new(false),
             wake_reconnect: Notify::new(),
+            cable_probe: AtomicBool::new(false),
             refused: Mutex::new(Default::default()),
             streaming: AtomicBool::new(false),
         });
@@ -468,6 +471,44 @@ impl Node {
     }
 
     /// La plateforme signale qu'un flux (miroir, audio, écran) est actif ou non.
+    /// Téléphone : un câble vient d'être branché. Le PC crée le tunnel USB quelques secondes
+    /// plus tard (et seulement après l'autorisation du débogage USB) : on sonde chaque seconde
+    /// pendant 45 s et on bascule dès qu'il répond.
+    pub fn cable_hint(&self) {
+        if self.inner.cfg.role != Role::Phone || self.inner.cable_probe.swap(true, Ordering::SeqCst)
+        {
+            return;
+        }
+        let inner = self.inner.clone();
+        self.rt().spawn(async move {
+            for _ in 0..45 {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                if inner.stopping.load(Ordering::SeqCst) {
+                    break;
+                }
+                let pcs: Vec<DeviceRecord> = inner
+                    .store
+                    .devices()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|d| d.platform == Platform::Windows)
+                    .collect();
+                let mut on_usb = 0;
+                for pc in &pcs {
+                    match inner.session(&pc.id) {
+                        Some(s) if s.addr.ip().is_loopback() => on_usb += 1,
+                        Some(_) => upgrade_to_usb(&inner, pc).await,
+                        None => inner.wake_reconnect.notify_one(),
+                    }
+                }
+                if on_usb > 0 {
+                    break;
+                }
+            }
+            inner.cable_probe.store(false, Ordering::SeqCst);
+        });
+    }
+
     pub fn set_streaming(&self, active: bool) {
         self.inner.streaming.store(active, Ordering::SeqCst);
     }
@@ -692,8 +733,9 @@ async fn reconnect_loop(inner: Arc<Inner>) {
                 }
             }
         }
+        // Connecté : vérifie toutes les 5 s si le câble USB est devenu disponible.
         let wait = if all_connected {
-            Duration::from_secs(10)
+            Duration::from_secs(5)
         } else {
             backoff
         };
@@ -708,7 +750,7 @@ async fn reconnect_loop(inner: Arc<Inner>) {
 }
 
 /// Adresse vue par le téléphone quand le PC a fait `adb reverse` (câble USB).
-fn usb_addr() -> SocketAddr {
+pub(crate) fn usb_addr() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], nc_transport::DEFAULT_PORT))
 }
 
@@ -759,6 +801,10 @@ async fn try_connect(inner: &Arc<Inner>, pc: &DeviceRecord) -> bool {
             tried.push(addr);
             match connect_to(inner, &key, addr).await {
                 Ok(()) => return true,
+                // Par le câble, on peut tomber sur un autre PC : ce n'est pas une révocation.
+                Err(TransportError::UnknownPeer) if addr == usb_addr() => {
+                    tracing::debug!("le câble USB mène à un autre PC");
+                }
                 Err(TransportError::UnknownPeer) => {
                     // Le PC ne nous reconnaît plus (révocation) : ne pas insister.
                     inner.refused.lock().unwrap().insert(pc.id.clone());
@@ -780,10 +826,9 @@ async fn upgrade_to_usb(inner: &Arc<Inner>, pc: &DeviceRecord) {
     let Some(s) = inner.session(&pc.id) else {
         return;
     };
-    if s.addr.ip().is_loopback()
-        || inner.streaming.load(Ordering::SeqCst)
-        || crate::transfers::busy(inner, &pc.id)
-    {
+    // Pas pendant un transfert de fichiers (il reprendrait, mais inutilement) ; les flux temps
+    // réel, eux, passent sans coupure visible sur la nouvelle liaison.
+    if s.addr.ip().is_loopback() || crate::transfers::busy(inner, &pc.id) {
         return;
     }
     let Ok(key): std::result::Result<[u8; 32], _> = pc.public_key.as_slice().try_into() else {

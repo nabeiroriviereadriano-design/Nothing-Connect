@@ -1,5 +1,15 @@
 # Notes de version
 
+## 0.5.0
+
+- **Encodage vidéo par la carte graphique** (NVIDIA, AMD, Intel via Media Foundation) pour l'écran étendu : beaucoup moins de charge processeur et moins de latence. Si la carte n'en propose pas ou échoue, retour automatique à l'encodeur logiciel ; réglage « Encodage » (Carte graphique / Processeur) et encodeur utilisé affiché dans les mesures.
+- **Capture et encodage en parallèle** : la capture de l'image suivante se fait pendant l'encodage de la précédente, et seule l'image la plus récente est envoyée (pas de retard qui s'accumule).
+- **File d'envoi bornée** : si le Wi-Fi ralentit, les images en retard sont abandonnées au lieu de s'empiler.
+- **Pause automatique** : quand le téléphone quitte l'écran étendu (accueil, autre appli, écran éteint), le PC arrête d'encoder et d'envoyer ; reprise immédiate au retour.
+- **Revenir à l'écran étendu** : notification « Écran étendu de … » sur le téléphone (la toucher y ramène, bouton « Débrancher »), bouton « Revenir à l'écran étendu » dans l'appli, et l'écran étendu apparaît dans les applis récentes.
+- **Détection du câble USB améliorée** : le PC réagit dès qu'un téléphone est branché (notification Windows au lieu d'une vérification toutes les 3 s), le téléphone sonde le câble dès qu'il détecte le branchement, et le passage Wi-Fi ↔ USB se fait sans couper l'écran étendu ni le son.
+- **Outils USB installés en un clic** : s'ils manquent, le PC propose de télécharger les outils officiels de Google (≈ 7 Mo) dans son dossier ; rappel sur l'accueil quand le téléphone attend l'autorisation « débogage USB ». Le désinstalleur les supprime.
+
 ## 0.4.1
 
 - **Association plus fiable** : le QR code contient toutes les adresses du PC (plusieurs cartes réseau, VPN, partage de connexion) et le téléphone les essaie toutes en même temps ; si aucune ne répond, il essaie le câble USB (débogage USB activé), même pour la première association.

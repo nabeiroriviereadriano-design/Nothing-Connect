@@ -92,7 +92,7 @@
         <activity
             android:name=".stream.DisplayActivity"
             android:exported="false"
-            android:excludeFromRecents="true"
+            android:autoRemoveFromRecents="true"
             android:taskAffinity=""
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density"

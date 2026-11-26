@@ -103,6 +103,10 @@ pub struct DisplayStatus {
     pub kbps: u32,
     /// Fréquence de l'écran virtuel (celle du téléphone).
     pub refresh_hz: u32,
+    /// Encodeur vidéo utilisé pendant la session.
+    pub encoder: Option<String>,
+    /// Le téléphone a quitté l'écran étendu (autre appli, écran éteint) : envoi suspendu.
+    pub paused: bool,
 }
 
 /// Compteurs de la session en cours (mis à jour chaque seconde par le fil de capture).
@@ -113,6 +117,8 @@ pub struct LiveStats {
     pub kbps: std::sync::atomic::AtomicU32,
     pub h264: std::sync::atomic::AtomicBool,
     pub hz: std::sync::atomic::AtomicU32,
+    /// Encodeur utilisé (carte graphique ou processeur).
+    pub encoder: std::sync::Mutex<String>,
 }
 
 #[cfg(windows)]
@@ -159,6 +165,8 @@ mod stub {
         }
         pub fn input(&self, _action: &nc_core::protocol::DisplayAction) {}
         pub fn set_touch(&self, _touch: bool) {}
+        pub fn set_gpu(&self, _gpu: bool) {}
+        pub fn set_paused(&self, _peer: &str, _paused: bool) {}
         pub fn request_frame(&self) {}
         pub fn set_quality(&self, _scale: f32, _jpeg_quality: u8, _fps: u32) {}
     }
@@ -780,6 +788,10 @@ mod win {
         active: Mutex<Option<Active>>,
         force_frame: Arc<AtomicBool>,
         stats: Arc<super::LiveStats>,
+        /// Encodage par la carte graphique autorisé (réglage « Encodage »).
+        gpu: Arc<AtomicBool>,
+        /// Écran du téléphone en arrière-plan : capture suspendue.
+        paused: Arc<AtomicBool>,
         /// Toucher du téléphone : écran tactile Windows (vrai) ou souris (faux).
         touch: AtomicBool,
         /// Mode souris : seul le premier doigt pilote le curseur.
@@ -797,6 +809,8 @@ mod win {
                 active: Mutex::new(None),
                 force_frame: Arc::new(AtomicBool::new(false)),
                 stats: Arc::new(super::LiveStats::default()),
+                gpu: Arc::new(AtomicBool::new(true)),
+                paused: Arc::new(AtomicBool::new(false)),
                 touch: AtomicBool::new(true),
                 mouse_finger: Mutex::new(None),
                 scale_pct: AtomicU32::new(75),
@@ -997,6 +1011,11 @@ mod win {
                     .as_ref()
                     .map(|_| self.stats.hz.load(Ordering::Relaxed))
                     .unwrap_or(0),
+                encoder: a
+                    .as_ref()
+                    .map(|_| self.stats.encoder.lock().unwrap().clone())
+                    .filter(|e| !e.is_empty()),
+                paused: a.is_some() && self.paused.load(Ordering::Relaxed),
             }
         }
 
@@ -1109,14 +1128,18 @@ mod win {
                 },
             );
 
-            let (app2, peer2, force, quality, fps, stats) = (
+            let (app2, peer2, force, quality, fps, stats, gpu, paused) = (
                 app.clone(),
                 peer.to_string(),
                 self.force_frame.clone(),
                 self.quality.clone(),
                 self.fps.clone(),
                 self.stats.clone(),
+                self.gpu.clone(),
+                self.paused.clone(),
             );
+            paused.store(false, Ordering::SeqCst);
+            *stats.encoder.lock().unwrap() = String::new();
             stats.h264.store(h264, Ordering::Relaxed);
             stats.hz.store(hz, Ordering::Relaxed);
             stats.fps.store(0, Ordering::Relaxed);
@@ -1169,138 +1192,294 @@ mod win {
                             }
                         }
                     }
-                    let mut bgra = Vec::new();
-                    let mut jpeg = Vec::with_capacity(512 * 1024);
-                    let mut enc: Option<crate::h264enc::H264> = None;
-                    let mut enc_q = 0u8;
-                    let mut last_sent = Instant::now() - Duration::from_secs(10);
-                    let t0 = Instant::now();
-                    // Mesures : images et octets envoyés pendant la dernière seconde.
-                    let counters = std::cell::Cell::new((0u32, 0u64, Instant::now()));
-                    let send = |flags: u8, data: &[u8]| -> bool {
-                        let ts = t0.elapsed().as_micros() as u64;
-                        let st = app2.state::<AppState>();
-                        let ok = st.node.lock().unwrap().send_stream(
-                            &peer2,
-                            StreamKind::Display,
-                            flags,
-                            ts,
-                            data,
+                    // Deux étages : ce fil capture (copie de l'image) au rythme demandé ; un second
+                    // fil encode et envoie la plus récente. La capture de l'image suivante se fait
+                    // donc pendant l'encodage de la précédente.
+                    struct Frame {
+                        bgra: Vec<u8>,
+                        w: u32,
+                        h: u32,
+                    }
+                    let latest = Arc::new(crate::pipeline::Latest::<Frame>::default());
+                    let want_key = Arc::new(AtomicBool::new(true));
+                    let (recycle_tx, recycle_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+                    let enc_thread = {
+                        let (latest, want_key, stop, stats) = (
+                            latest.clone(),
+                            want_key.clone(),
+                            stop.clone(),
+                            stats.clone(),
                         );
-                        if ok {
-                            let (mut n, mut b, since) = counters.get();
-                            b += data.len() as u64;
-                            if flags & crate::h264enc::CONFIG == 0 {
-                                n += 1;
-                            }
-                            let el = since.elapsed();
-                            if el >= Duration::from_secs(1) {
-                                stats.fps.store(
-                                    (n as f64 / el.as_secs_f64()).round() as u32,
-                                    Ordering::Relaxed,
-                                );
-                                stats.kbps.store(
-                                    (b as f64 * 8.0 / 1000.0 / el.as_secs_f64()) as u32,
-                                    Ordering::Relaxed,
-                                );
-                                counters.set((0, 0, Instant::now()));
-                            } else {
-                                counters.set((n, b, since));
-                            }
-                        }
-                        ok
+                        let (app2, peer2, quality, fps, gpu) = (
+                            app2.clone(),
+                            peer2.clone(),
+                            quality.clone(),
+                            fps.clone(),
+                            gpu.clone(),
+                        );
+                        std::thread::Builder::new()
+                            .name("nc-display-enc".into())
+                            .spawn(move || {
+                                encode_loop(EncodeCtx {
+                                    app: app2,
+                                    peer: peer2,
+                                    latest,
+                                    want_key,
+                                    stop,
+                                    stats,
+                                    quality,
+                                    fps,
+                                    gpu,
+                                    hz,
+                                    h264,
+                                    recycle: recycle_tx,
+                                })
+                            })
                     };
+                    let mut last = Instant::now() - Duration::from_secs(10);
+                    let mut spare: Option<Vec<u8>> = None;
                     while !stop.load(Ordering::SeqCst) {
-                        // Écran immobile : rien n'est envoyé, les mesures retombent à zéro.
-                        if counters.get().2.elapsed() > Duration::from_millis(1500) {
-                            stats.fps.store(0, Ordering::Relaxed);
-                            stats.kbps.store(0, Ordering::Relaxed);
-                            counters.set((0, 0, Instant::now()));
+                        // Écran du téléphone en arrière-plan : rien n'est capturé ni envoyé.
+                        if paused.load(Ordering::Relaxed) {
+                            std::thread::sleep(Duration::from_millis(50));
+                            continue;
                         }
-                        // 0 = fréquence maximale du téléphone.
                         let f = match fps.load(Ordering::Relaxed) {
                             0 => hz,
                             f => f,
                         };
                         let interval = Duration::from_micros(1_000_000 / f.max(1) as u64);
-                        // JPEG : image de rappel toutes les 2 s. H.264 : image clé seulement sur demande.
                         let asked = force.swap(false, Ordering::SeqCst);
-                        let forced =
-                            asked || (!h264 && last_sent.elapsed() > Duration::from_secs(2));
+                        if asked {
+                            want_key.store(true, Ordering::SeqCst);
+                        }
+                        // JPEG : image de rappel toutes les 2 s. H.264 : seulement sur demande.
+                        let forced = asked || (!h264 && last.elapsed() > Duration::from_secs(2));
+                        let mut buf = spare
+                            .take()
+                            .or_else(|| recycle_rx.try_recv().ok())
+                            .unwrap_or_default();
                         let Some((w, h)) =
-                            reader.next(&mut bgra, Duration::from_millis(100), forced)
+                            reader.next(&mut buf, Duration::from_millis(100), forced)
                         else {
+                            spare = Some(buf);
                             continue;
                         };
-                        if last_sent.elapsed() < interval {
-                            std::thread::sleep(interval - last_sent.elapsed());
+                        if last.elapsed() < interval {
+                            std::thread::sleep(interval - last.elapsed());
                         }
-                        let q = quality.load(Ordering::Relaxed);
-                        if !h264 {
-                            if encode_jpeg(&bgra, w, h, q, &mut jpeg).is_ok()
-                                && send(nc_core::protocol::stream_flags::KEYFRAME, &jpeg)
-                            {
-                                last_sent = Instant::now();
-                            }
-                            continue;
+                        last = Instant::now();
+                        if let Some(old) = latest.put(Frame { bgra: buf, w, h }) {
+                            // Image remplacée avant d'être encodée : son tampon resservira.
+                            spare = Some(old.bgra);
                         }
-                        // (Re)création de l'encodeur si la définition, la qualité ou la fréquence change.
-                        let size = crate::h264enc::H264::even(w, h);
-                        if enc.as_ref().map(|e| e.size() != size).unwrap_or(true) || enc_q != q {
-                            let rate = crate::h264enc::bitrate_for(size.0, size.1, f, q);
-                            match crate::h264enc::H264::new(size.0, size.1, f, rate) {
-                                Ok(e) => {
-                                    enc = Some(e);
-                                    enc_q = q;
-                                    tracing::info!(
-                                        "écran étendu : H.264 {}×{} à {f} i/s, {} kbit/s",
-                                        size.0,
-                                        size.1,
-                                        rate / 1000
-                                    );
-                                    let st = app2.state::<AppState>();
-                                    let _ = st.node.lock().unwrap().send(
-                                        &peer2,
-                                        Message::StreamStart {
-                                            kind: StreamKind::Display,
-                                            params: StreamParams {
-                                                codec: Some("h264".into()),
-                                                width: Some(size.0),
-                                                height: Some(size.1),
-                                                refresh_hz: Some(hz),
-                                                ..Default::default()
-                                            },
-                                        },
-                                    );
-                                }
-                                Err(e) => {
-                                    tracing::warn!("{e}");
-                                    std::thread::sleep(Duration::from_millis(500));
-                                    continue;
-                                }
+                    }
+                    latest.close();
+                    if let Ok(t) = enc_thread {
+                        let _ = t.join();
+                    }
+
+                    /// Encodeur de la session : carte graphique si possible, sinon processeur.
+                    enum Enc {
+                        Hw(crate::mfenc::MfH264),
+                        Sw(crate::h264enc::H264),
+                    }
+                    impl Enc {
+                        fn size(&self) -> (u32, u32) {
+                            match self {
+                                Enc::Hw(e) => e.size(),
+                                Enc::Sw(e) => e.size(),
                             }
                         }
-                        let Some(e) = enc.as_mut() else { continue };
-                        if asked {
-                            e.force_keyframe();
+                        fn force_keyframe(&mut self) {
+                            match self {
+                                Enc::Hw(e) => e.force_keyframe(),
+                                Enc::Sw(e) => e.force_keyframe(),
+                            }
                         }
-                        match e.encode_bgra(&bgra, w) {
-                            Ok(packets) => {
-                                let mut ok = true;
-                                for (flags, data) in &packets {
-                                    if !send(*flags, data) {
-                                        ok = false;
-                                        break;
+                        fn encode(
+                            &mut self,
+                            b: &[u8],
+                            w: u32,
+                        ) -> Result<Vec<(u8, Vec<u8>)>, String> {
+                            match self {
+                                Enc::Hw(e) => e.encode_bgra(b, w),
+                                Enc::Sw(e) => e.encode_bgra(b, w),
+                            }
+                        }
+                        fn is_hw(&self) -> bool {
+                            matches!(self, Enc::Hw(_))
+                        }
+                    }
+
+                    struct EncodeCtx {
+                        app: AppHandle,
+                        peer: String,
+                        latest: Arc<crate::pipeline::Latest<Frame>>,
+                        want_key: Arc<AtomicBool>,
+                        stop: Arc<AtomicBool>,
+                        stats: Arc<super::LiveStats>,
+                        quality: Arc<AtomicU8>,
+                        fps: Arc<AtomicU32>,
+                        gpu: Arc<AtomicBool>,
+                        hz: u32,
+                        h264: bool,
+                        recycle: std::sync::mpsc::Sender<Vec<u8>>,
+                    }
+
+                    fn encode_loop(c: EncodeCtx) {
+                        let mut jpeg = Vec::with_capacity(512 * 1024);
+                        let mut enc: Option<Enc> = None;
+                        let mut enc_cfg = (0u8, 0u32, false);
+                        let mut hw_failed = false;
+                        let t0 = Instant::now();
+                        // Mesures : images et octets envoyés pendant la dernière seconde.
+                        let mut counters = (0u32, 0u64, Instant::now());
+                        let send =
+                            |flags: u8, data: &[u8], counters: &mut (u32, u64, Instant)| -> bool {
+                                let ts = t0.elapsed().as_micros() as u64;
+                                let st = c.app.state::<AppState>();
+                                let ok = st.node.lock().unwrap().send_stream(
+                                    &c.peer,
+                                    StreamKind::Display,
+                                    flags,
+                                    ts,
+                                    data,
+                                );
+                                if ok {
+                                    counters.1 += data.len() as u64;
+                                    if flags & crate::h264enc::CONFIG == 0 {
+                                        counters.0 += 1;
                                     }
                                 }
-                                if ok {
-                                    last_sent = Instant::now();
-                                } else {
-                                    // Image perdue (réseau saturé) : la suivante repart d'une image clé.
-                                    e.force_keyframe();
+                                ok
+                            };
+                        loop {
+                            // Mesures publiées chaque seconde (zéro si l'écran est immobile).
+                            let el = counters.2.elapsed();
+                            if el >= Duration::from_secs(1) {
+                                c.stats.fps.store(
+                                    (counters.0 as f64 / el.as_secs_f64()).round() as u32,
+                                    Ordering::Relaxed,
+                                );
+                                c.stats.kbps.store(
+                                    (counters.1 as f64 * 8.0 / 1000.0 / el.as_secs_f64()) as u32,
+                                    Ordering::Relaxed,
+                                );
+                                counters = (0, 0, Instant::now());
+                            }
+                            let Some(frame) = c.latest.take(Duration::from_millis(200)) else {
+                                if c.latest.closed() || c.stop.load(Ordering::SeqCst) {
+                                    return;
+                                }
+                                continue;
+                            };
+                            let q = c.quality.load(Ordering::Relaxed);
+                            if !c.h264 {
+                                if encode_jpeg(&frame.bgra, frame.w, frame.h, q, &mut jpeg).is_ok()
+                                {
+                                    send(
+                                        nc_core::protocol::stream_flags::KEYFRAME,
+                                        &jpeg,
+                                        &mut counters,
+                                    );
+                                }
+                                let _ = c.recycle.send(frame.bgra);
+                                continue;
+                            }
+                            let f = match c.fps.load(Ordering::Relaxed) {
+                                0 => c.hz,
+                                f => f,
+                            };
+                            let gpu = c.gpu.load(Ordering::Relaxed) && !hw_failed;
+                            // (Re)création si la définition, la qualité, la fréquence ou le choix
+                            // d'encodeur change.
+                            let size = crate::h264enc::H264::even(frame.w, frame.h);
+                            if enc.as_ref().map(|e| e.size() != size).unwrap_or(true)
+                                || enc_cfg != (q, f, gpu)
+                            {
+                                enc = None;
+                                let rate = crate::h264enc::bitrate_for(size.0, size.1, f, q);
+                                if gpu {
+                                    match crate::mfenc::MfH264::new(size.0, size.1, f, rate) {
+                                        Ok(e) => {
+                                            *c.stats.encoder.lock().unwrap() = e.name.clone();
+                                            enc = Some(Enc::Hw(e));
+                                        }
+                                        Err(err) => {
+                                            tracing::warn!(
+                                                "encodage matériel indisponible : {err}"
+                                            );
+                                            hw_failed = true;
+                                        }
+                                    }
+                                }
+                                if enc.is_none() {
+                                    match crate::h264enc::H264::new(size.0, size.1, f, rate) {
+                                        Ok(e) => {
+                                            *c.stats.encoder.lock().unwrap() =
+                                                "Processeur (OpenH264)".into();
+                                            enc = Some(Enc::Sw(e));
+                                        }
+                                        Err(err) => {
+                                            tracing::warn!("{err}");
+                                            let _ = c.recycle.send(frame.bgra);
+                                            std::thread::sleep(Duration::from_millis(500));
+                                            continue;
+                                        }
+                                    }
+                                }
+                                enc_cfg = (q, f, gpu);
+                                c.want_key.store(true, Ordering::SeqCst);
+                                tracing::info!(
+                                    "écran étendu : H.264 {}×{} à {f} i/s, {} kbit/s",
+                                    size.0,
+                                    size.1,
+                                    rate / 1000
+                                );
+                                let st = c.app.state::<AppState>();
+                                let _ = st.node.lock().unwrap().send(
+                                    &c.peer,
+                                    Message::StreamStart {
+                                        kind: StreamKind::Display,
+                                        params: StreamParams {
+                                            codec: Some("h264".into()),
+                                            width: Some(size.0),
+                                            height: Some(size.1),
+                                            refresh_hz: Some(c.hz),
+                                            ..Default::default()
+                                        },
+                                    },
+                                );
+                            }
+                            let Some(e) = enc.as_mut() else {
+                                let _ = c.recycle.send(frame.bgra);
+                                continue;
+                            };
+                            if c.want_key.swap(false, Ordering::SeqCst) {
+                                e.force_keyframe();
+                            }
+                            match e.encode(&frame.bgra, frame.w) {
+                                Ok(packets) => {
+                                    for (flags, data) in &packets {
+                                        if !send(*flags, data, &mut counters) {
+                                            // Image perdue (réseau saturé) : la suivante repart
+                                            // d'une image clé.
+                                            c.want_key.store(true, Ordering::SeqCst);
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    tracing::warn!("{err}");
+                                    if e.is_hw() {
+                                        // Carte graphique défaillante : on bascule sur le processeur.
+                                        hw_failed = true;
+                                        enc = None;
+                                    }
                                 }
                             }
-                            Err(err) => tracing::warn!("{err}"),
+                            let _ = c.recycle.send(frame.bgra);
                         }
                     }
                 })
@@ -1349,6 +1528,21 @@ mod win {
 
         pub fn request_frame(&self) {
             self.force_frame.store(true, Ordering::SeqCst);
+        }
+
+        pub fn set_gpu(&self, gpu: bool) {
+            self.gpu.store(gpu, Ordering::SeqCst);
+        }
+
+        /// Le téléphone quitte ou retrouve l'écran étendu (appli en arrière-plan).
+        pub fn set_paused(&self, peer: &str, paused: bool) {
+            if self.active.lock().unwrap().as_ref().map(|a| a.peer == peer) != Some(true) {
+                return;
+            }
+            self.paused.store(paused, Ordering::SeqCst);
+            if !paused {
+                self.force_frame.store(true, Ordering::SeqCst);
+            }
         }
 
         pub fn set_touch(&self, touch: bool) {

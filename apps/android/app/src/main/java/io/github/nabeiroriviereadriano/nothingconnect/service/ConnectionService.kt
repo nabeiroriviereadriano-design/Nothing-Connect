@@ -34,6 +34,17 @@ class ConnectionService : LifecycleService() {
     private var commands: Commands? = null
     private var received: ReceivedFiles? = null
     private val listener: (JSONObject) -> Unit = { e -> onCoreEvent(e) }
+    /** Câble branché : le cœur sonde le tunnel USB et bascule dès qu'il répond. */
+    private val cableReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            val plugged = when (i.action) {
+                Intent.ACTION_POWER_CONNECTED -> true
+                USB_STATE -> i.getBooleanExtra("connected", false)
+                else -> false
+            }
+            if (plugged) runCatching { Core.node.cableHint() }
+        }
+    }
     private val netCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = Core.node.networkChanged()
         override fun onLost(network: Network) = Core.node.networkChanged()
@@ -51,6 +62,16 @@ class ConnectionService : LifecycleService() {
         getSystemService(ConnectivityManager::class.java).registerNetworkCallback(
             NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), netCallback,
         )
+        // État USB « collant » : reçu aussi au démarrage si le câble est déjà branché.
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, cableReceiver,
+            android.content.IntentFilter().apply { addAction(Intent.ACTION_POWER_CONNECTED); addAction(USB_STATE) },
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        // Notification « écran étendu » restée d'une session précédente (processus arrêté).
+        if (Streams.displayPeer.value == null) runCatching {
+            getSystemService(android.app.NotificationManager::class.java).cancel(Notifs.ID_DISPLAY)
+        }
         status = StatusReporter(this).also { it.start() }
         commands = Commands(this)
         received = ReceivedFiles(this)
@@ -67,6 +88,7 @@ class ConnectionService : LifecycleService() {
 
     override fun onDestroy() {
         Core.unsubscribe(listener)
+        runCatching { unregisterReceiver(cableReceiver) }
         Streams.stopPcAudio()
         status?.stop()
         commands?.stopRing()
@@ -143,5 +165,9 @@ class ConnectionService : LifecycleService() {
         fun stop(ctx: Context) {
             ctx.stopService(Intent(ctx, ConnectionService::class.java))
         }
+    }
+
+    companion object {
+        private const val USB_STATE = "android.hardware.usb.action.USB_STATE"
     }
 }

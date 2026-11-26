@@ -294,9 +294,14 @@ impl NcNode {
             .send_stream(&peer_id, kind, flags, ts_us, &data)
     }
 
-    /// Signale un flux actif (empêche la bascule automatique Wi-Fi → USB pendant le flux).
+    /// Signale un flux actif (informatif : la bascule Wi-Fi ↔ USB est sans coupure pour les flux).
     pub fn set_streaming(&self, active: bool) {
         self.node.lock().unwrap().set_streaming(active);
+    }
+
+    /// Câble USB branché : bascule sur le câble dès que le PC a créé le tunnel.
+    pub fn cable_hint(&self) {
+        self.node.lock().unwrap().cable_hint();
     }
 
     /// Efface toutes les données et l'identité de l'appareil.

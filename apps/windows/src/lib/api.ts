@@ -203,13 +203,15 @@ export const api = {
   androidInstall: (serial: string | null) => invoke<string>("android_install", { serial }),
   displayStatus: () => invoke<DisplayStatus>("display_status"),
   displaySetup: (action: "install" | "uninstall" | "enable-testsigning" | "install-vdd") => invoke<string>("display_setup", { action }),
-  displayStart: (peerId: string, scale: number, quality: number, fps: number, portrait: boolean, touch: boolean) =>
-    invoke<void>("display_start", { peerId, scale, quality, fps, portrait, touch }),
+  displayStart: (peerId: string, scale: number, quality: number, fps: number, portrait: boolean, touch: boolean, gpu: boolean) =>
+    invoke<void>("display_start", { peerId, scale, quality, fps, portrait, touch, gpu }),
   displayStop: () => invoke<void>("display_stop"),
-  displayTune: (scale: number, quality: number, fps: number, touch: boolean) => invoke<void>("display_tune", { scale, quality, fps, touch }),
+  displayTune: (scale: number, quality: number, fps: number, touch: boolean, gpu: boolean) =>
+    invoke<void>("display_tune", { scale, quality, fps, touch, gpu }),
   uiPrefsGet: () => invoke<Record<string, unknown>>("ui_prefs_get"),
   firewallStatus: () => invoke<FirewallStatus>("firewall_status"),
   firewallAllow: () => invoke<void>("firewall_allow"),
+  usbToolsInstall: () => invoke<string>("usb_tools_install"),
   uiPrefsSet: (prefs: object) => invoke<void>("ui_prefs_set", { prefs }),
 };
 
@@ -221,5 +223,5 @@ export interface DisplayStatus {
   supported: boolean; installed: boolean; testsigning: boolean; active_peer: string | null;
   width: number; height: number; setup_available: boolean;
   vdd_installed: boolean; backend: "nothing-connect" | "vdd" | null;
-  codec: "h264" | "jpeg" | null; fps: number; kbps: number; refresh_hz: number;
+  codec: "h264" | "jpeg" | null; fps: number; kbps: number; refresh_hz: number; encoder: string | null; paused: boolean;
 }

@@ -18,6 +18,7 @@ object Notifs {
     const val CH_STREAM = "stream"
     const val ID_SERVICE = 1
     const val ID_MIRROR = 2
+    const val ID_DISPLAY = 3
 
     fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)

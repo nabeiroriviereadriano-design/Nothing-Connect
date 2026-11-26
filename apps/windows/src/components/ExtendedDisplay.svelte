@@ -87,8 +87,11 @@
         <div><span class="dot n">{st.fps}</span><span class="muted small">images/s</span></div>
         <div><span class="dot n">{st.refresh_hz || "—"}</span><span class="muted small">Hz</span></div>
         <div><span class="dot n">{(st.kbps / 1000).toFixed(st.kbps < 10000 ? 1 : 0)}</span><span class="muted small">Mb/s</span></div>
-        <div><span class="dot n res">{st.width}×{st.height}</span><span class="muted small">{st.codec === "h264" ? "vidéo H.264" : "images JPEG"} · {app.name(st.active_peer!)}</span></div>
+        <div><span class="dot n res">{st.width}×{st.height}</span><span class="muted small">{st.codec === "h264" ? (st.encoder ?? "vidéo H.264") : "images JPEG"}, {app.name(st.active_peer!)}</span></div>
       </div>
+      {#if st.paused}
+        <p class="muted small">En pause : le téléphone affiche une autre appli. Touchez la notification « Écran étendu » sur le téléphone pour reprendre.</p>
+      {/if}
     {:else if !app.has("extended_display") && app.device}
       <p class="muted small">Mettez à jour l'application Android pour utiliser l'écran étendu.</p>
     {/if}
@@ -109,6 +112,10 @@
       <Segmented label="Orientation" value={p.portrait} onchange={(v) => display.change("portrait", v)} options={[
         { value: false, label: "Paysage" },
         { value: true, label: "Portrait" },
+      ]} />
+      <Segmented label="Encodage" value={p.gpu} onchange={(v) => display.change("gpu", v)} options={[
+        { value: true, label: "Carte graphique", hint: "NVIDIA, AMD ou Intel : plus rapide, presque sans charge pour le processeur" },
+        { value: false, label: "Processeur", hint: "Si l'image est abîmée avec la carte graphique" },
       ]} />
       <Segmented label="Toucher" value={p.touch} onchange={(v) => display.change("touch", v)} options={[
         { value: true, label: "Tactile", hint: "Comme un écran tactile : défiler, zoomer, appui long, gestes à 3 et 4 doigts" },

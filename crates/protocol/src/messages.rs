@@ -60,6 +60,8 @@ pub enum Capability {
     ExtendedDisplay,
     /// Le PC accepte le toucher multipoint et les gestes/le clavier de l'écran étendu (`display_input`).
     DisplayTouch,
+    /// Le PC suspend l'écran étendu quand le téléphone le quitte (`display_pause`).
+    DisplayPause,
     #[serde(other)]
     Unknown,
 }
@@ -499,6 +501,11 @@ pub enum Message {
     /// Téléphone → PC : geste, touche ou texte pendant l'écran étendu (si le PC annonce
     /// la capacité `display_touch`).
     DisplayInput(DisplayAction),
+    /// Téléphone → PC : l'écran étendu passe en arrière-plan (`true`) ou revient (`false`) ;
+    /// le PC suspend alors la capture et l'encodage.
+    DisplayPause {
+        paused: bool,
+    },
     /// Message d'une version plus récente : ignoré au lieu de couper la connexion.
     #[serde(other)]
     Unknown,

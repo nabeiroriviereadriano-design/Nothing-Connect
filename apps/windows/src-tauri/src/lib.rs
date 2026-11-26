@@ -11,6 +11,9 @@ mod display;
 mod firewall;
 mod h264enc;
 mod media;
+#[cfg(windows)]
+mod mfenc;
+mod pipeline;
 mod secrets;
 mod sink;
 mod tray;
@@ -39,6 +42,10 @@ pub struct AppState {
 pub const HIDDEN_ARG: &str = "--hidden";
 /// Argument utilisé par le désinstalleur : efface les secrets du Credential Manager.
 pub const PURGE_ARG: &str = "--purge-secrets";
+/// Argument utilisé par le désinstalleur : arrête adb et supprime les outils USB téléchargés.
+pub const CLEANUP_USB_ARG: &str = "--cleanup-usb-tools";
+/// Identifiant de l'application (dossier de données : %APPDATA%\<identifiant>).
+const APP_ID: &str = "io.github.nabeiroriviereadriano.nothingconnect";
 
 fn device_info() -> DeviceInfo {
     let name = std::env::var("COMPUTERNAME")
@@ -57,6 +64,7 @@ fn device_info() -> DeviceInfo {
             Capability::Clipboard,
             Capability::ExtendedDisplay,
             Capability::DisplayTouch,
+            Capability::DisplayPause,
         ],
     }
 }
@@ -84,6 +92,17 @@ fn init_logs(dir: &std::path::Path) {
 
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == CLEANUP_USB_ARG) {
+        if let Some(dir) = dirs::data_dir().map(|d| d.join(APP_ID).join("platform-tools")) {
+            let adb = dir.join(if cfg!(windows) { "adb.exe" } else { "adb" });
+            if adb.is_file() {
+                let _ = adb::run(&adb, &["kill-server"]);
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        return;
+    }
     if args.iter().any(|a| a == PURGE_ARG) {
         let store = secrets::store(&std::env::temp_dir());
         let _ = nc_security::Identity::destroy(&*store);
@@ -182,7 +201,8 @@ pub fn run() {
                 ble: Mutex::new(ble_adv),
             });
             clipboard::start(app.handle().clone());
-            adb::start(app.handle().clone());
+            let tools = app.state::<AppState>().data_dir.join("platform-tools");
+            adb::start(app.handle().clone(), tools);
             tray::create(app.handle())?;
             if !start_hidden {
                 tray::show_main(app.handle());

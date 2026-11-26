@@ -128,6 +128,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2cb931c189b85683d69a5cfad41d4d418671e1ac413dd209f3f2fc31e3cfd902"
 
 [[package]]
+name = "arbitrary"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
+dependencies = [
+ "derive_arbitrary",
+]
+
+[[package]]
 name = "arboard"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1147,6 +1156,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "derive_arbitrary"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b034bd7d5f032402a2479444dcc6f74e36a03f31854d41680fb240ef682a1ac"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3049,7 +3069,7 @@ dependencies = [
 
 [[package]]
 name = "nc-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "hex",
  "nc-pairing",
@@ -3070,7 +3090,7 @@ dependencies = [
 
 [[package]]
 name = "nc-ffi"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "android_logger",
  "log",
@@ -3084,7 +3104,7 @@ dependencies = [
 
 [[package]]
 name = "nc-pairing"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "hkdf",
  "rand 0.8.8",
@@ -3095,7 +3115,7 @@ dependencies = [
 
 [[package]]
 name = "nc-protocol"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3105,7 +3125,7 @@ dependencies = [
 
 [[package]]
 name = "nc-security"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "hex",
  "keyring",
@@ -3117,7 +3137,7 @@ dependencies = [
 
 [[package]]
 name = "nc-storage"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "hex",
  "nc-protocol",
@@ -3131,7 +3151,7 @@ dependencies = [
 
 [[package]]
 name = "nc-transfer"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "hex",
  "nc-protocol",
@@ -3145,7 +3165,7 @@ dependencies = [
 
 [[package]]
 name = "nc-transport"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mdns-sd",
  "nc-pairing",
@@ -3259,7 +3279,7 @@ dependencies = [
 
 [[package]]
 name = "nothing-connect-windows"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "arboard",
  "cpal",
@@ -3289,6 +3309,7 @@ dependencies = [
  "ureq",
  "uuid",
  "windows",
+ "zip 2.6.1",
 ]
 
 [[package]]
@@ -5567,7 +5588,7 @@ dependencies = [
  "tokio",
  "url",
  "windows-sys 0.61.2",
- "zip",
+ "zip 9.8.2",
 ]
 
 [[package]]
@@ -7454,6 +7475,21 @@ dependencies = [
 
 [[package]]
 name = "zip"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dcb24d0152526ae49b9b96c1dcf71850ca1e0b882e4e28ed898a93c41334744"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "crossbeam-utils",
+ "flate2",
+ "indexmap 2.14.2",
+ "memchr",
+ "zopfli",
+]
+
+[[package]]
+name = "zip"
 version = "9.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d8dbe089cf6b0448b78f5fc50139ab5aaa40d08ac07cdc1baf2c13add35fcce"
@@ -7481,6 +7517,18 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zopfli"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaf7fc5d30c28483d93805c4a5e12b05bbb52407fa67c5f8bd552374cd01fb11"
+dependencies = [
+ "bumpalo",
+ "crc32fast",
+ "log",
+ "simd-adler32",
+]
 
 [[package]]
 name = "zruntime"

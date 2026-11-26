@@ -51,6 +51,7 @@ Prologue Noise : `nothing-connect/1`.
 | `stream_keyframe` | ↔ | Demande d'image clé (décodeur qui démarre, image perdue) |
 | `input` | PC → tél. | Contrôle du miroir : `tap`, `long_press`, `swipe`, `key` (`back`, `home`, `recents`, `notifications`), `text` ; coordonnées 0..1 |
 | `display_pointer` | tél. → PC | Toucher sur l'écran étendu : `down`/`move`/`up`/`cancel`, identifiant, coordonnées 0..1 |
+| `display_pause` | tél. → PC | `{"paused":true}` quand l'écran étendu passe en arrière-plan sur le téléphone, `false` au retour (le PC suspend l'encodage) ; envoyé seulement si le PC annonce `display_pause` |
 | `display_input` | tél. → PC | Écran étendu : `{"a":"key","key":…}` (`back`, `task_view`, `show_desktop`, `next_app`, `prev_app`, `next_desktop`, `prev_desktop`, `touch_keyboard`, `backspace`, `enter`…) ou `{"a":"text","text":…}` ; envoyé seulement si le PC annonce `display_touch` |
 
 ## Compatibilité

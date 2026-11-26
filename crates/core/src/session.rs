@@ -26,9 +26,15 @@ const CONFIRM_TIMEOUT: Duration = Duration::from_secs(90);
 /// File de données : ~16 trames pleines (≈1 Mo) en vol → contre-pression vers le disque.
 const DATA_QUEUE: usize = 16;
 const CTRL_QUEUE: usize = 256;
-/// File des flux temps réel : ≈ 4 Mo. Pleine = réseau saturé → l'unité est abandonnée
+/// File des flux temps réel. Pleine = réseau saturé → l'unité est abandonnée
 /// (une image perdue vaut mieux qu'une latence qui s'accumule).
 const STREAM_QUEUE: usize = 64;
+/// Octets de flux en attente d'envoi au plus : ≈ 100 à 300 ms de vidéo selon le débit. Au-delà,
+/// l'image est abandonnée (le récepteur demande une image clé) au lieu d'accumuler du retard.
+const STREAM_BYTES: usize = 768 * 1024;
+/// Après une coupure, délai pendant lequel une nouvelle connexion (bascule USB ↔ Wi-Fi) remplace
+/// la session sans que les applications voient de déconnexion (écran étendu, miroir, son).
+const HANDOVER_GRACE: Duration = Duration::from_secs(4);
 /// Taille maximale d'une unité de flux réassemblée (image H.264 / JPEG).
 const MAX_STREAM_UNIT: usize = 16 << 20;
 
@@ -40,6 +46,8 @@ pub(crate) struct Session {
     data: mpsc::Sender<Vec<u8>>,
     closed: AtomicBool,
     close_notify: Notify,
+    /// Octets de flux en file (voir `STREAM_BYTES`).
+    stream_bytes: std::sync::atomic::AtomicUsize,
 }
 
 impl Session {
@@ -64,9 +72,16 @@ impl Session {
             return false;
         }
         let n = payload.len().div_ceil(MAX_STREAM_FRAGMENT).max(1);
+        let total = payload.len() + n * STREAM_HEADER;
+        let queued = self.stream_bytes.load(Ordering::Relaxed);
+        // Une unité seule passe toujours (image clé volumineuse sur une file vide).
+        if queued > 0 && queued + total > STREAM_BYTES {
+            return false;
+        }
         let Ok(permits) = self.stream.try_reserve_many(n) else {
             return false;
         };
+        self.stream_bytes.fetch_add(total, Ordering::Relaxed);
         let base = flags & !(stream_flags::START | stream_flags::END);
         let mut chunks = payload.chunks(MAX_STREAM_FRAGMENT);
         for (i, permit) in permits.enumerate() {
@@ -175,7 +190,12 @@ pub(crate) async fn run(inner: Arc<Inner>, est: Established, initiator: bool) {
             .upsert_device(
                 &peer_key,
                 &remote,
-                initiator.then(|| peer_addr.to_string()).as_deref(),
+                // L'adresse du câble USB (boucle locale) n'est pas une adresse du PC.
+                initiator
+                    .then_some(peer_addr)
+                    .filter(|a| *a != crate::node::usb_addr())
+                    .map(|a| a.to_string())
+                    .as_deref(),
             )
             .is_err()
         {
@@ -195,6 +215,7 @@ pub(crate) async fn run(inner: Arc<Inner>, est: Established, initiator: bool) {
         data: data_tx,
         closed: AtomicBool::new(false),
         close_notify: Notify::new(),
+        stream_bytes: std::sync::atomic::AtomicUsize::new(0),
     });
     if let Some(old) = inner
         .sessions
@@ -241,8 +262,30 @@ pub(crate) async fn run(inner: Arc<Inner>, est: Established, initiator: bool) {
     }
     let _ = inner.store.touch_device(&peer_id, None);
     if inner.session(&peer_id).is_none() {
-        transfers::on_disconnected(&inner, &peer_id);
-        inner.emit(Event::PeerDisconnected { peer_id, reason });
+        // Coupure (câble débranché, Wi-Fi perdu) : le téléphone se reconnecte tout de suite par
+        // l'autre liaison. Pendant un court délai, la nouvelle session remplace l'ancienne sans
+        // déconnexion visible ; un départ volontaire n'attend pas.
+        let deliberate = matches!(
+            reason.as_str(),
+            "fermée par le pair" | "association révoquée par le pair"
+        ) || inner.stopping.load(Ordering::SeqCst)
+            || inner.store.device(&peer_id).ok().flatten().is_none();
+        if !deliberate {
+            if inner.cfg.role == crate::node::Role::Phone {
+                inner.wake_reconnect.notify_one();
+            }
+            let until = tokio::time::Instant::now() + HANDOVER_GRACE;
+            while tokio::time::Instant::now() < until
+                && inner.session(&peer_id).is_none()
+                && !inner.stopping.load(Ordering::SeqCst)
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+        if inner.session(&peer_id).is_none() {
+            transfers::on_disconnected(&inner, &peer_id);
+            inner.emit(Event::PeerDisconnected { peer_id, reason });
+        }
     }
 }
 
@@ -342,15 +385,23 @@ async fn write_loop(
     s: Arc<Session>,
 ) {
     // Priorités : contrôle > flux temps réel > fichiers.
+    let done = |b: &Vec<u8>, is_stream: bool| {
+        if is_stream {
+            s.stream_bytes.fetch_sub(b.len(), Ordering::Relaxed);
+        }
+    };
     loop {
         let first = tokio::select! {
             biased;
             _ = s.close_notify.notified() => break,
-            m = ctrl.recv() => m,
-            m = stream.recv() => m,
-            m = data.recv() => m,
+            m = ctrl.recv() => m.map(|b| (b, false)),
+            m = stream.recv() => m.map(|b| (b, true)),
+            m = data.recv() => m.map(|b| (b, false)),
         };
-        let Some(first) = first else { break };
+        let Some((first, is_stream)) = first else {
+            break;
+        };
+        done(&first, is_stream);
         if w.write_raw(&first).await.is_err() {
             break;
         }
@@ -360,10 +411,12 @@ async fn write_loop(
         for _ in 0..32 {
             let next = ctrl
                 .try_recv()
-                .or_else(|_| stream.try_recv())
-                .or_else(|_| data.try_recv());
+                .map(|b| (b, false))
+                .or_else(|_| stream.try_recv().map(|b| (b, true)))
+                .or_else(|_| data.try_recv().map(|b| (b, false)));
             match next {
-                Ok(b) => {
+                Ok((b, is_stream)) => {
+                    done(&b, is_stream);
                     if w.write_raw(&b).await.is_err() {
                         ok = false;
                         break;
@@ -596,6 +649,7 @@ fn dispatch(inner: &Arc<Inner>, s: &Arc<Session>, m: Message) -> Option<String> 
         | Message::StreamKeyframe { .. }
         | Message::Input(_)
         | Message::DisplayInput(_)
+        | Message::DisplayPause { .. }
         | Message::DisplayPointer { .. }) => inner.emit(Event::Request {
             peer_id: peer,
             message: m,

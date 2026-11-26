@@ -131,6 +131,19 @@ private fun HomeScreen(onPair: () -> Unit) {
         else "Ouvrez NOTHING CONNECT sur le PC. Les deux appareils doivent être sur le même Wi-Fi.",
         color = Nc.Muted,
     )
+    val displayPeer by io.github.nabeiroriviereadriano.nothingconnect.stream.Streams.displayPeer.collectAsStateWithLifecycle()
+    displayPeer?.let { id ->
+        Panel {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatusDot(true)
+                Text("Écran étendu de ${devices.firstOrNull { it.id == id }?.name ?: "votre PC"} ouvert", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            }
+            Text("Il est en pause tant que vous êtes ailleurs sur le téléphone.", color = Nc.Muted)
+            Primary("Revenir à l'écran étendu") {
+                ctx.startActivity(io.github.nabeiroriviereadriano.nothingconnect.stream.DisplayActivity.returnIntent(ctx))
+            }
+        }
+    }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Primary("Envoyer des fichiers", enabled = online.isNotEmpty()) { picker.launch(arrayOf("*/*")) }
         Secondary("Associer un PC") { onPair() }

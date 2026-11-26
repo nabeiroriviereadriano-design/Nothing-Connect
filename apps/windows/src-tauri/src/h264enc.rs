@@ -50,6 +50,10 @@ impl H264 {
             // Jamais d'image sautée : le téléphone doit voir chaque changement.
             .skip_frames(false)
             .complexity(Complexity::Low)
+            // Analyses inutiles pour un bureau (moins de calcul). La détection d'arrière-plan
+            // reste active : elle divise par 4 le poids des images où peu de choses bougent.
+            .scene_change_detect(false)
+            .adaptive_quantization(false)
             // Images clés à la demande du téléphone ; une toutes les 10 s par sécurité.
             .intra_frame_period(IntraFramePeriod::from_num_frames(fps.clamp(5, 240) * 10))
             .num_threads(threads)
@@ -105,6 +109,55 @@ impl H264 {
             .map_err(|e| format!("encodage H.264 : {e}"))?
             .write_vec(&mut self.out);
         Ok(split_annexb(&self.out))
+    }
+}
+
+/// BGRA → NV12 (plan Y puis U/V entrelacés), format d'entrée des encodeurs matériels.
+/// La conversion réutilise la routine optimisée d'OpenH264 puis entrelace la chrominance.
+pub struct Nv12 {
+    yuv: YUVBuffer,
+    w: usize,
+    h: usize,
+    crop: Vec<u8>,
+    pub data: Vec<u8>,
+}
+
+impl Nv12 {
+    pub fn new(w: u32, h: u32) -> Self {
+        Self {
+            yuv: YUVBuffer::new(w as usize, h as usize),
+            w: w as usize,
+            h: h as usize,
+            crop: Vec::new(),
+            data: Vec::new(),
+        }
+    }
+
+    pub fn convert(&mut self, bgra: &[u8], src_w: u32) -> Result<(), String> {
+        use openh264::formats::YUVSource;
+        let (w, h, sw) = (self.w, self.h, src_w as usize);
+        if sw < w || bgra.len() < sw * h * 4 {
+            return Err("image incomplète".into());
+        }
+        let src: &[u8] = if sw == w {
+            &bgra[..w * h * 4]
+        } else {
+            self.crop.resize(w * h * 4, 0);
+            for y in 0..h {
+                self.crop[y * w * 4..(y + 1) * w * 4]
+                    .copy_from_slice(&bgra[y * sw * 4..y * sw * 4 + w * 4]);
+            }
+            &self.crop
+        };
+        self.yuv.read_bgra8(BgraSliceU8::new(src, (w, h)));
+        self.data.resize(w * h * 3 / 2, 0);
+        let (y, uv) = self.data.split_at_mut(w * h);
+        y.copy_from_slice(self.yuv.y());
+        for (i, (u, v)) in self.yuv.u().iter().zip(self.yuv.v()).enumerate() {
+            uv[2 * i] = *u;
+            uv[2 * i + 1] = *v;
+        }
+        Ok(())
     }
 }
 
@@ -217,6 +270,18 @@ mod tests {
             .encode_bgra(&frame(w as usize, h as usize, 3), w)
             .unwrap();
         assert!(p.iter().any(|(f, _)| *f == KEYFRAME));
+    }
+
+    #[test]
+    fn nv12_layout() {
+        let (w, h) = (4usize, 2usize);
+        // Blanc pur : Y = 235, U = V = 128 (plage limitée BT.601).
+        let src = vec![255u8; w * h * 4];
+        let mut n = Nv12::new(w as u32, h as u32);
+        n.convert(&src, w as u32).unwrap();
+        assert_eq!(n.data.len(), w * h * 3 / 2);
+        assert!(n.data[..w * h].iter().all(|y| (*y as i32 - 235).abs() <= 1));
+        assert!(n.data[w * h..].iter().all(|c| (*c as i32 - 128).abs() <= 1));
     }
 
     #[test]

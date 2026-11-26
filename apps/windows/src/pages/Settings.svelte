@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { usbTools, installUsbTools } from "../lib/state.svelte";
   import { app } from "../lib/state.svelte";
   import { api, type Settings } from "../lib/api";
   import Toggle from "../components/Toggle.svelte";
@@ -76,7 +77,7 @@
     <Toggle checked={s.clipboard_sync} label="Synchroniser le presse-papiers" hint="Le texte copié sur le PC est envoyé au téléphone, et inversement depuis l'appli Android. Désactivé par défaut." onchange={(v) => patch({ clipboard_sync: v })} />
     <Toggle checked={s.usb_adb} label="Liaison par câble USB" hint="Utilise adb (débogage USB) quand le téléphone est branché : liaison prioritaire sur le Wi-Fi." onchange={(v) => patch({ usb_adb: v })} />
     <p class="muted small">
-      {#if !app.usb?.adb}adb introuvable : installez « SDK Platform-Tools » de Google pour la liaison USB.
+      {#if !app.usb?.adb}Outils USB absents. <button class="link" disabled={usbTools.installing} onclick={installUsbTools}>{usbTools.installing ? "Installation…" : "Les installer (Google, ≈ 7 Mo)"}</button>
       {:else if !app.usb.devices.length}adb trouvé. Aucun téléphone branché en USB.
       {:else}{#each app.usb.devices as [serial, state]}{serial} : {state === "device" ? (app.usb.tunneled.includes(serial) ? "liaison USB active" : "prêt") : state === "unauthorized" ? "acceptez « Autoriser le débogage USB » sur le téléphone" : state}. {/each}{/if}
     </p>
@@ -158,4 +159,5 @@
   .sel { width: auto; }
   .wrap { flex-wrap: wrap; margin-top: 10px; }
   .notes { white-space: pre-wrap; background: var(--black); padding: 12px; border-radius: 12px; margin: 8px 0 0; font-family: var(--ui); }
+  .link { background: none; border: none; padding: 0; color: var(--white); text-decoration: underline; text-underline-offset: 3px; font-size: inherit; }
 </style>

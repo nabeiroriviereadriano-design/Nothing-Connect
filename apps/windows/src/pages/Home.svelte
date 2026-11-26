@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app } from "../lib/state.svelte";
+  import { app, usbTools, installUsbTools } from "../lib/state.svelte";
   import { api, type FirewallStatus } from "../lib/api";
   import { bytes, ago } from "../lib/format";
   import { pickAndSend } from "../lib/send";
@@ -51,6 +51,11 @@
           <button disabled={!app.online || !app.has("screen_mirror")} onclick={() => (app.page = "mirror")}>Voir l'écran du téléphone</button>
           {#if app.has("ring")}<button disabled={!app.online} onclick={ring}>Faire sonner</button>{/if}
         </div>
+        {#if app.usb?.devices.some(([, s]) => s === "unauthorized")}
+          <p class="small">Téléphone branché : acceptez « Autoriser le débogage USB » sur son écran pour passer en liaison par câble.</p>
+        {:else if app.online && app.link?.link !== "usb" && app.settings?.usb_adb && app.usb && !app.usb.adb}
+          <p class="muted small">Liaison par câble plus fluide (débogage USB) : <button class="link" disabled={usbTools.installing} onclick={installUsbTools}>{usbTools.installing ? "installation des outils…" : "installer les outils USB"}</button></p>
+        {/if}
         {#if !app.online}
           <p class="muted small">Ouvrez l'application sur le téléphone : il se reconnecte seul dès qu'il est sur le même réseau ou branché en USB.</p>
           {#if fw?.needs_fix}

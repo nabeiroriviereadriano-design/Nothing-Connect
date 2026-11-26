@@ -136,6 +136,10 @@ impl EventSink for TauriSink {
                 message: nc_core::protocol::Message::DisplayInput(action),
                 ..
             } => self.media.display.input(action),
+            Event::Request {
+                peer_id,
+                message: nc_core::protocol::Message::DisplayPause { paused },
+            } => self.media.display.set_paused(peer_id, *paused),
             Event::PeerDisconnected { peer_id, .. } | Event::DeviceRemoved { peer_id } => {
                 self.media.display.stop_if_peer(&self.app, peer_id);
                 self.media.capture.lock().unwrap().take();

@@ -55,7 +55,7 @@ class DisplayController {
     if (!app.selected) return;
     const p = prefs.display;
     this.starting = true;
-    const ok = await app.run(api.displayStart(app.selected, p.scale, p.quality, p.fps, p.portrait, p.touch));
+    const ok = await app.run(api.displayStart(app.selected, p.scale, p.quality, p.fps, p.portrait, p.touch, p.gpu));
     if (ok === undefined) this.starting = false;
     else app.toast("Ouverture de l'écran sur le téléphone…");
     setTimeout(() => { this.starting = false; this.refresh(); }, 8000);
@@ -73,9 +73,9 @@ class DisplayController {
   async change<K extends keyof typeof prefs.display>(key: K, value: (typeof prefs.display)[K]) {
     prefs.display[key] = value;
     savePrefs();
-    if (this.active && (key === "quality" || key === "fps" || key === "touch")) {
+    if (this.active && (key === "quality" || key === "fps" || key === "touch" || key === "gpu")) {
       const p = prefs.display;
-      await api.displayTune(p.scale, p.quality, p.fps, p.touch).catch(() => {});
+      await api.displayTune(p.scale, p.quality, p.fps, p.touch, p.gpu).catch(() => {});
     }
   }
 

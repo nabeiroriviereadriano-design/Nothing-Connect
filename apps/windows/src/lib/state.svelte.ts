@@ -6,6 +6,15 @@ import {
   type StreamKind, type StreamParams, type UsbStatus,
 } from "./api";
 
+/** Téléchargement des outils USB (adb) en cours. */
+export const usbTools = $state({ installing: false });
+
+export async function installUsbTools() {
+  usbTools.installing = true;
+  await app.run(api.usbToolsInstall(), "Outils USB installés : branchez le téléphone (débogage USB activé)");
+  usbTools.installing = false;
+}
+
 export type Page = "home" | "share" | "notifications" | "control" | "media" | "mirror" | "devices" | "settings";
 
 export interface LiveTransfer {

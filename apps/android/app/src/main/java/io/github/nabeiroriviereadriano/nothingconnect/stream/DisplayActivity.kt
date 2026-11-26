@@ -183,6 +183,8 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
     private fun announce(w: Int, h: Int) {
         if (announced || isFinishing) return
         announced = true
+        Streams.displayPeer.value = peer
+        postNotification()
         val params = JSONObject().put("codec", "h264").put("width", w).put("height", h)
             .put("dpi", resources.displayMetrics.densityDpi).put("refresh_hz", maxHz)
         Core.send(peer, Streams.startMessage("display", params))
@@ -583,9 +585,67 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
         }
     }
 
+    // ------------------------------------------------------------------ retour à l'écran étendu
+
+    /** Notification tant que l'écran étendu est ouvert : la toucher y ramène. */
+    private fun postNotification() {
+        val name = Core.devices.value.firstOrNull { it.id == peer }?.name ?: "le PC"
+        val open = android.app.PendingIntent.getActivity(
+            this, 30, returnIntent(this),
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val stop = android.app.PendingIntent.getActivity(
+            this, 31, returnIntent(this).setAction(ACTION_STOP),
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val n = androidx.core.app.NotificationCompat.Builder(this, io.github.nabeiroriviereadriano.nothingconnect.core.Notifs.CH_STREAM)
+            .setSmallIcon(io.github.nabeiroriviereadriano.nothingconnect.R.drawable.ic_stat)
+            .setContentTitle("Écran étendu de $name")
+            .setContentText("Touchez pour revenir à l'écran étendu.")
+            .setOngoing(true)
+            .setContentIntent(open)
+            .addAction(0, "Revenir", open)
+            .addAction(0, "Débrancher", stop)
+            .build()
+        runCatching {
+            getSystemService(android.app.NotificationManager::class.java)
+                .notify(io.github.nabeiroriviereadriano.nothingconnect.core.Notifs.ID_DISPLAY, n)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == ACTION_STOP) finish()
+    }
+
+    /** Écran étendu quitté (accueil, autre appli, écran éteint) : le PC suspend l'envoi. */
+    override fun onStop() {
+        super.onStop()
+        if (announced && !isFinishing && pcPause()) {
+            Core.send(peer, JSONObject().put("t", "display_pause").put("paused", true))
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (announced && pcPause()) {
+            Core.send(peer, JSONObject().put("t", "display_pause").put("paused", false))
+            askKeyframe(force = true)
+        }
+    }
+
+    private fun pcPause() = Core.devices.value.firstOrNull { it.id == peer }?.capabilities?.contains("display_pause") == true
+
     override fun onDestroy() {
         main.removeCallbacksAndMessages(null)
-        if (instance === this) instance = null
+        if (instance === this) {
+            instance = null
+            Streams.displayPeer.value = null
+            runCatching {
+                getSystemService(android.app.NotificationManager::class.java)
+                    .cancel(io.github.nabeiroriviereadriano.nothingconnect.core.Notifs.ID_DISPLAY)
+            }
+        }
         if (!stoppedByPc && announced) Core.send(peer, Streams.stopMessage("display"))
         stopDecoder()
         jpegExec.shutdownNow()
@@ -597,6 +657,11 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
         private const val EXTRA_PEER = "peer"
         private const val EXTRA_PARAMS = "params"
         private val ANNOUNCE = Any()
+        private const val ACTION_STOP = "io.github.nabeiroriviereadriano.nothingconnect.DISPLAY_STOP"
+
+        /** Ramène l'écran étendu au premier plan (instance existante, sans le recréer). */
+        fun returnIntent(ctx: Context): Intent = Intent(ctx, DisplayActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         /** Contenu permanent du champ caché : un effacement se voit même quand rien n'a été tapé. */
         private const val SENTINEL = "  "
 

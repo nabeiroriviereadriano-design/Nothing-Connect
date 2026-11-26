@@ -24,6 +24,10 @@
       ExecShellWait "runas" "netsh" 'advfirewall firewall delete rule name="NOTHING CONNECT"' SW_HIDE
     ${EndIf}
   ${EndIf}
+  ; Outils USB (adb) téléchargés par l'application : arrêt du serveur adb puis suppression.
+  ${If} $UpdateMode <> 1
+    ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --cleanup-usb-tools'
+  ${EndIf}
   Delete "$APPDATA\Microsoft\Windows\SendTo\NOTHING CONNECT.lnk"
   ; Démarrage automatique éventuellement activé dans l'application.
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "NOTHING CONNECT"

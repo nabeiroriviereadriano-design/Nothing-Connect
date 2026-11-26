@@ -69,6 +69,14 @@ fn lan_ips() -> Vec<String> {
     v.into_iter().map(|(_, s)| s).take(8).collect()
 }
 
+/// Installe les outils USB officiels de Google (adb) : liaison par câble sans démarche manuelle.
+#[tauri::command]
+async fn usb_tools_install() -> R<String> {
+    tauri::async_runtime::spawn_blocking(crate::adb::install_tools)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn firewall_status() -> crate::firewall::FirewallStatus {
     tauri::async_runtime::spawn_blocking(crate::firewall::status)
@@ -377,6 +385,7 @@ fn set_settings(s: State<AppState>, settings: Settings) -> R<()> {
         .set_settings(settings.clone())
         .map_err(e)?;
     *s.settings.write().unwrap() = settings;
+    crate::adb::wake();
     Ok(())
 }
 
@@ -606,6 +615,7 @@ async fn display_setup(app: tauri::AppHandle, action: String) -> R<String> {
 
 /// Demande au téléphone d'ouvrir l'écran étendu ; le moniteur est branché quand il répond.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn display_start(
     s: State<AppState>,
     peer_id: String,
@@ -614,9 +624,11 @@ fn display_start(
     fps: u32,
     portrait: bool,
     touch: Option<bool>,
+    gpu: Option<bool>,
 ) -> R<()> {
     s.media.display.set_quality(scale, quality, fps);
     s.media.display.set_touch(touch.unwrap_or(true));
+    s.media.display.set_gpu(gpu.unwrap_or(true));
     let params = nc_core::protocol::StreamParams {
         codec: Some("jpeg".into()),
         portrait: Some(portrait),
@@ -638,10 +650,20 @@ fn display_start(
 
 /// Qualité et fréquence modifiées pendant une session : appliquées sans débrancher l'écran.
 #[tauri::command]
-fn display_tune(s: State<AppState>, scale: f32, quality: u8, fps: u32, touch: Option<bool>) {
+fn display_tune(
+    s: State<AppState>,
+    scale: f32,
+    quality: u8,
+    fps: u32,
+    touch: Option<bool>,
+    gpu: Option<bool>,
+) {
     s.media.display.set_quality(scale, quality, fps);
     if let Some(t) = touch {
         s.media.display.set_touch(t);
+    }
+    if let Some(g) = gpu {
+        s.media.display.set_gpu(g);
     }
 }
 
@@ -697,6 +719,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         display_status,
         ui_prefs_get,
         firewall_status,
+        usb_tools_install,
         firewall_allow,
         ui_prefs_set,
         display_setup,
