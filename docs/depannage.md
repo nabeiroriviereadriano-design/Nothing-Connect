@@ -18,3 +18,20 @@
 - Android : `adb logcat -s nc-core`.
 
 Les journaux ne contiennent ni clés ni contenus ; vous pouvez les joindre à un signalement.
+
+## L'application Android ne s'installe pas (Play Protect)
+
+Voir [play-protect.md](play-protect.md) : le plus simple est l'installation par câble depuis le PC.
+
+## L'écran étendu ne démarre pas
+
+- Page Écran étendu : vérifiez qu'un pilote est installé. Si le pilote intégré est refusé,
+  installez Virtual Display Driver. Détails : [pilote-ecran.md](pilote-ecran.md).
+- Le téléphone doit afficher la notification « … veut utiliser ce téléphone comme écran » :
+  touchez-la si l'écran ne s'ouvre pas tout seul (Android limite l'ouverture en arrière-plan).
+
+## Le miroir reste noir ou le contrôle ne répond pas
+
+- Acceptez la fenêtre Android « Commencer à diffuser ? » sur le téléphone (demandée à chaque fois).
+- Pour le contrôle : activez « NOTHING CONNECT : contrôle depuis le PC » dans Accessibilité.
+- Le son d'une application peut manquer : certaines interdisent sa capture (choix du développeur).
