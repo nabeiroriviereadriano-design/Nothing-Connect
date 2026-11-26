@@ -26,7 +26,7 @@
       <h1>{d.custom_name || d.name}</h1>
       <p class="muted">{[d.manufacturer, d.model, d.os_version && `Android ${d.os_version}`].filter(Boolean).join(", ") || "Android"}</p>
       <div class="facts">
-        <div><span class="muted small">Liaison</span><span>{app.online ? `Wi-Fi local, ${app.link?.addr.split(":")[0]}` : "Hors ligne"}</span></div>
+        <div><span class="muted small">Liaison</span><span>{app.online ? (app.link?.link === "usb" ? "Câble USB" : `Réseau local, ${app.link?.addr.split(":")[0]}`) : "Hors ligne"}</span></div>
         <div><span class="muted small">Stockage libre</span><span>{st?.storage_free_bytes != null ? `${bytes(st.storage_free_bytes)} sur ${bytes(st.storage_total_bytes)}` : "—"}</span></div>
         <div><span class="muted small">Dernière connexion</span><span>{app.online ? "maintenant" : ago(d.last_seen)}</span></div>
       </div>

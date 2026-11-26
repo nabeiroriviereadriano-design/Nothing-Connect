@@ -29,8 +29,9 @@ jobs:
         run: cargo test --release -p nc-core --test e2e -- throughput --nocapture
 
   windows:
-    name: Application Windows
-    runs-on: windows-latest
+    name: Application Windows + pilote d'écran
+    # windows-2022 : image fournie avec le Windows Driver Kit (WDK).
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -45,8 +46,17 @@ jobs:
           npm ci
           npm run check
           npm run build
+      - name: Pilote d'écran étendu (IddCx) et outil d'installation
+        shell: pwsh
+        run: ./native/windows/display-driver/build-driver.ps1
       - name: Compilation de l'application
         run: cargo build --release -p nothing-connect-windows
+      - name: Tests de l'application
+        run: cargo test -p nothing-connect-windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pilote-ecran-ncdisplay
+          path: apps/windows/src-tauri/driver/
 
   android:
     name: Application Android

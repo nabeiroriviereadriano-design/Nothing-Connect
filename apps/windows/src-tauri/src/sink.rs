@@ -22,6 +22,7 @@ pub struct TauriSink {
     app: AppHandle,
     settings: Arc<RwLock<Settings>>,
     pub snapshot: Arc<Mutex<Snapshot>>,
+    media: Arc<crate::media::Media>,
 }
 
 impl TauriSink {
@@ -29,11 +30,13 @@ impl TauriSink {
         app: AppHandle,
         settings: Arc<RwLock<Settings>>,
         snapshot: Arc<Mutex<Snapshot>>,
+        media: Arc<crate::media::Media>,
     ) -> Self {
         Self {
             app,
             settings,
             snapshot,
+            media,
         }
     }
 
@@ -74,6 +77,10 @@ impl TauriSink {
 }
 
 impl EventSink for TauriSink {
+    fn stream(&self, peer_id: &str, packet: nc_core::StreamPacket) {
+        self.media.on_stream(peer_id, packet);
+    }
+
     fn emit(&self, e: Event) {
         self.remember(&e);
         let s = self.settings.read().unwrap().clone();
@@ -109,6 +116,38 @@ impl EventSink for TauriSink {
                 ..
             } => {
                 self.toast("Réception terminée", None);
+            }
+            Event::Clipboard { content, .. } if s.clipboard_sync => {
+                crate::clipboard::apply_remote(content)
+            }
+            // Touchers sur l'écran étendu : traités immédiatement (pas de thread par événement).
+            Event::Request {
+                message:
+                    nc_core::protocol::Message::DisplayPointer {
+                        action,
+                        x,
+                        y,
+                        pointer,
+                    },
+                ..
+            } => {
+                if *pointer == 0 {
+                    self.media.display.pointer(*action, *x, *y);
+                }
+            }
+            Event::PeerDisconnected { peer_id, .. } | Event::DeviceRemoved { peer_id } => {
+                self.media.display.stop_if_peer(&self.app, peer_id);
+                self.media.capture.lock().unwrap().take();
+            }
+            Event::Request { peer_id, message } => {
+                // Hors du fil réseau : l'ouverture d'un périphérique audio peut prendre du temps.
+                let (media, app, peer, msg) = (
+                    self.media.clone(),
+                    self.app.clone(),
+                    peer_id.clone(),
+                    message.clone(),
+                );
+                std::thread::spawn(move || media.on_message(&app, &peer, &msg));
             }
             Event::Share { content, .. } => {
                 self.toast(

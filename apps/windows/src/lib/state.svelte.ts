@@ -3,9 +3,10 @@ import {
   api,
   type AppEntry, type AppInfo, type CoreEvent, type DeviceRecord, type DeviceStatus, type MediaSession,
   type NotificationRecord, type PeerLink, type PhoneNotification, type Settings, type TransferRecord, type TransferState,
+  type StreamKind, type StreamParams, type UsbStatus,
 } from "./api";
 
-export type Page = "home" | "share" | "notifications" | "control" | "media" | "devices" | "settings";
+export type Page = "home" | "share" | "notifications" | "control" | "media" | "mirror" | "display" | "devices" | "settings";
 
 export interface LiveTransfer {
   id: string;
@@ -45,6 +46,10 @@ class AppStore {
   refused = $state<Record<string, boolean>>({});
   toasts = $state<Toast[]>([]);
   updateVersion = $state<string | null>(null);
+  /** Flux annoncés par le téléphone (format réel), par type. */
+  streams = $state<Partial<Record<StreamKind, StreamParams>>>({});
+  streamStopped = $state<Partial<Record<StreamKind, string | null>>>({});
+  usb = $state<UsbStatus | null>(null);
   private toastSeq = 0;
 
   get device(): DeviceRecord | null {
@@ -102,6 +107,8 @@ class AppStore {
   async init() {
     await listen<CoreEvent>("nc-event", (e) => this.onEvent(e.payload));
     await listen("nc-settings-changed", async () => (this.settings = await api.getSettings()));
+    await listen<UsbStatus>("nc-usb", (e) => (this.usb = e.payload));
+    this.usb = await api.usbStatus();
     this.info = await api.appInfo();
     this.settings = await api.getSettings();
     const snap = await api.snapshot();
@@ -179,6 +186,20 @@ class AppStore {
         this.toast(e.kind === "link" ? "Lien reçu du téléphone (copié)" : "Texte reçu du téléphone (copié)");
         navigator.clipboard?.writeText(e.content).catch(() => {});
         break;
+      case "clipboard":
+        break;
+      case "request": {
+        const m = e.message as { t: string; kind?: StreamKind; params?: StreamParams; reason?: string | null };
+        if (m.t === "stream_start" && m.kind) {
+          this.streams[m.kind] = m.params ?? {};
+          delete this.streamStopped[m.kind];
+        } else if (m.t === "stream_stop" && m.kind) {
+          delete this.streams[m.kind];
+          this.streamStopped[m.kind] = m.reason ?? null;
+          if (m.reason) this.toast(m.reason, "error");
+        }
+        break;
+      }
       case "command_result":
         if (!e.ok) this.toast(`Commande refusée par le téléphone : ${e.error ?? "raison inconnue"}`, "error");
         break;

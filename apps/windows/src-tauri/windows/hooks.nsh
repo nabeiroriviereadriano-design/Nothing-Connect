@@ -8,6 +8,12 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  ; Pilote d'écran étendu : retiré seulement s'il est installé (une fenêtre d'autorisation
+  ; Windows s'affiche alors). Ne s'exécute pas lors d'une mise à jour.
+  ${If} $UpdateMode <> 1
+    IfFileExists "$INSTDIR\driver\NcDisplaySetup.exe" 0 +2
+      ExecWait '"$INSTDIR\driver\NcDisplaySetup.exe" uninstall-if-present'
+  ${EndIf}
   Delete "$APPDATA\Microsoft\Windows\SendTo\NOTHING CONNECT.lnk"
   ; Démarrage automatique éventuellement activé dans l'application.
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "NOTHING CONNECT"

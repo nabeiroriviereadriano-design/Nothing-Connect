@@ -1,7 +1,14 @@
 //! Application Windows : couche d'interface et d'intégration système uniquement.
 //! Toute la logique métier est dans `nc-core`.
 
+mod adb;
+mod apkinstall;
+mod audio;
+mod ble;
+mod clipboard;
 mod commands;
+mod display;
+mod media;
 mod secrets;
 mod sink;
 mod tray;
@@ -19,6 +26,9 @@ pub struct AppState {
     pub data_dir: PathBuf,
     pub secrets: Box<dyn nc_core::SecretStore>,
     pub snapshot: Arc<Mutex<sink::Snapshot>>,
+    pub media: Arc<media::Media>,
+    #[cfg(windows)]
+    pub ble: Mutex<Option<ble::Advertiser>>,
 }
 
 /// Argument passé par le démarrage automatique : démarrer réduit dans la zone de notification.
@@ -113,10 +123,12 @@ pub fn run() {
             let secrets = secrets::store(&data_dir);
             let settings = Arc::new(RwLock::new(Settings::default()));
             let snapshot = Arc::new(Mutex::new(sink::Snapshot::default()));
+            let media = Arc::new(media::Media::default());
             let sink = Arc::new(sink::TauriSink::new(
                 app.handle().clone(),
                 settings.clone(),
                 snapshot.clone(),
+                media.clone(),
             ));
             let cfg = NodeConfig {
                 role: Role::Pc,
@@ -130,13 +142,37 @@ pub fn run() {
             *settings.write().unwrap() = node.settings();
             node.start().map_err(|e| e.to_string())?;
             tracing::info!("NOTHING CONNECT {} démarré", env!("CARGO_PKG_VERSION"));
+            let ble_payload = match local_ip_address::local_ip() {
+                Ok(std::net::IpAddr::V4(v4)) => node
+                    .listen_addr()
+                    .and_then(|a| ble::payload(&node.fingerprint(), v4, a.port())),
+                _ => None,
+            };
+            let ble_enabled = settings.read().unwrap().ble_advertise;
+            #[cfg(windows)]
+            let ble_adv = ble_payload.filter(|_| ble_enabled).and_then(|p| {
+                match ble::Advertiser::start(&p) {
+                    Ok(a) => Some(a),
+                    Err(e) => {
+                        tracing::info!("annonce Bluetooth indisponible : {e}");
+                        None
+                    }
+                }
+            });
+            #[cfg(not(windows))]
+            let _ = (ble_payload, ble_enabled);
             app.manage(AppState {
                 node: Mutex::new(node),
                 settings,
                 data_dir,
                 secrets,
                 snapshot,
+                media,
+                #[cfg(windows)]
+                ble: Mutex::new(ble_adv),
             });
+            clipboard::start(app.handle().clone());
+            adb::start(app.handle().clone());
             tray::create(app.handle())?;
             if !start_hidden {
                 tray::show_main(app.handle());

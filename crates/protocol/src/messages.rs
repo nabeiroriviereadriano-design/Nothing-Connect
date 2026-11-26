@@ -108,6 +108,8 @@ pub struct StreamParams {
     /// Pour l'écran étendu : densité (dpi) et fréquence proposées par le téléphone.
     pub dpi: Option<u32>,
     pub refresh_hz: Option<u32>,
+    /// Pour l'écran étendu : orientation demandée au téléphone.
+    pub portrait: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

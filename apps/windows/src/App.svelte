@@ -12,6 +12,8 @@
   import Media from "./pages/Media.svelte";
   import Devices from "./pages/Devices.svelte";
   import SettingsPage from "./pages/Settings.svelte";
+  import Mirror from "./pages/Mirror.svelte";
+  import Display from "./pages/Display.svelte";
   import PairingDialog from "./components/PairingDialog.svelte";
   import PairingRequest from "./components/PairingRequest.svelte";
   import { pickAndSend } from "./lib/send";
@@ -22,6 +24,8 @@
     { id: "notifications", label: "Notifications" },
     { id: "control", label: "Centre de contrôle" },
     { id: "media", label: "Multimédia" },
+    { id: "mirror", label: "Écran du téléphone" },
+    { id: "display", label: "Écran étendu" },
     { id: "devices", label: "Appareils" },
     { id: "settings", label: "Paramètres" },
   ];
@@ -80,7 +84,7 @@
           <span class={app.online ? "live" : "idle"}></span>
           <span class="ellipsis">{app.device.custom_name || app.device.name}</span>
         </div>
-        <span class="muted small">{app.online ? "Connecté en Wi-Fi" : app.refused[app.device.id] ? "Association révoquée" : "Hors ligne"}</span>
+        <span class="muted small">{app.online ? (app.link?.link === "usb" ? "Connecté par câble USB" : "Connecté sur le réseau local") : app.refused[app.device.id] ? "Association révoquée" : "Hors ligne"}</span>
       {:else}
         <span class="muted small">Aucun téléphone associé</span>
       {/if}
@@ -114,6 +118,8 @@
       {:else if app.page === "notifications"}<Notifications />
       {:else if app.page === "control"}<Control />
       {:else if app.page === "media"}<Media />
+      {:else if app.page === "mirror"}<Mirror />
+      {:else if app.page === "display"}<Display />
       {:else if app.page === "devices"}<Devices />
       {:else}<SettingsPage />{/if}
     {/if}

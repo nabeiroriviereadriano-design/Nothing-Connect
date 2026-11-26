@@ -3,6 +3,24 @@
   import { api, type MediaAction } from "../lib/api";
 
   let sessions = $derived((app.selected && app.media[app.selected]) || []);
+  let pcAudio = $state(false);
+  let phoneAudio = $derived(!!app.streams.phone_audio);
+  api.pcAudioActive().then((v) => (pcAudio = v));
+
+  async function togglePc() {
+    if (!app.selected) return;
+    if (pcAudio) {
+      await app.run(api.pcAudioStop());
+      pcAudio = false;
+    } else if ((await app.run(api.pcAudioStart(app.selected))) !== undefined) {
+      pcAudio = true;
+    }
+  }
+  async function togglePhone() {
+    if (!app.selected) return;
+    if (phoneAudio) await app.run(api.phoneAudioStop(app.selected));
+    else await app.run(api.phoneAudioStart(app.selected), "Acceptez la capture du son sur le téléphone.");
+  }
   function go(id: string, a: MediaAction) {
     if (app.selected) app.run(api.media(app.selected, id, a));
   }
@@ -11,7 +29,24 @@
 
 <div class="stack page">
   <h1>Multimédia</h1>
-  <p class="muted">Contrôle des lectures en cours sur le téléphone. Le son reste sur le téléphone : la transmission audio vers le PC n'est pas encore disponible.</p>
+  <section class="panel stack">
+    <h2>Son</h2>
+    <div class="row">
+      <div class="grow stack tight">
+        <span>Son du téléphone sur le PC</span>
+        <span class="muted small">Android demande l'accord à chaque démarrage. Certaines applications (appels, contenus protégés) interdisent la capture de leur son.</span>
+      </div>
+      <button disabled={!app.online || !app.has("phone_audio")} onclick={togglePhone}>{phoneAudio ? "Arrêter" : "Écouter sur le PC"}</button>
+    </div>
+    <div class="row">
+      <div class="grow stack tight">
+        <span>Son du PC sur le téléphone</span>
+        <span class="muted small">Tout le son joué par Windows est envoyé au téléphone (latence d'environ un dixième de seconde).</span>
+      </div>
+      <button disabled={!app.online || !app.has("audio_playback")} onclick={togglePc}>{pcAudio ? "Arrêter" : "Envoyer au téléphone"}</button>
+    </div>
+  </section>
+  <h2>Lectures en cours</h2>
   {#if !app.has("media_control")}
     <p class="panel">Ce téléphone n'annonce pas le contrôle multimédia. Il nécessite l'accès aux notifications sur le téléphone.</p>
   {:else if !sessions.length}
@@ -46,4 +81,5 @@
   .noart { background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 48px; }
   .meta { gap: 4px; min-width: 0; }
   .controls { margin-top: 10px; }
+  .tight { gap: 2px; }
 </style>

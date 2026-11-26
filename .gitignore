@@ -14,3 +14,7 @@ apps/android/app/src/main/jniLibs/
 apps/android/app/src/main/java/uniffi/
 apps/android/keystore.properties
 apps/android/.kotlin/
+# Pilote compilé (CI)
+native/windows/display-driver/**/x64/
+apps/windows/src-tauri/driver/*
+!apps/windows/src-tauri/driver/LISEZMOI.txt

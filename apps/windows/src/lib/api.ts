@@ -1,10 +1,29 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type Channel } from "@tauri-apps/api/core";
 
 // ---- Types partagés avec le cœur Rust (sérialisation serde) ----
 
 export type Capability =
   | "file_transfer" | "share_text" | "device_status" | "notifications" | "notification_actions"
-  | "media_control" | "ring" | "vibrate" | "media_volume" | "do_not_disturb" | "unknown";
+  | "media_control" | "ring" | "vibrate" | "media_volume" | "do_not_disturb"
+  | "clipboard" | "screen_mirror" | "mirror_control" | "phone_audio" | "audio_playback" | "extended_display" | "unknown";
+
+export type StreamKind = "mirror" | "phone_audio" | "pc_audio" | "display";
+export interface StreamParams {
+  codec?: string | null; width?: number | null; height?: number | null; max_size?: number | null;
+  fps?: number | null; bitrate?: number | null; sample_rate?: number | null; channels?: number | null;
+  with_audio?: boolean | null; dpi?: number | null; refresh_hz?: number | null;
+}
+export type InputEvent =
+  | { i: "tap"; x: number; y: number }
+  | { i: "long_press"; x: number; y: number }
+  | { i: "swipe"; x1: number; y1: number; x2: number; y2: number; duration_ms: number }
+  | { i: "key"; key: "back" | "home" | "recents" | "notifications" }
+  | { i: "text"; text: string };
+export type StreamMessage =
+  | { t: "stream_start"; kind: StreamKind; params: StreamParams }
+  | { t: "stream_stop"; kind: StreamKind; reason: string | null }
+  | { t: "stream_request"; kind: StreamKind; params: StreamParams };
+export interface UsbStatus { adb: string | null; devices: [string, string][]; tunneled: string[] }
 
 export interface DeviceRecord {
   id: string;
@@ -92,6 +111,9 @@ export interface Settings {
   store_notification_content: boolean;
   notification_history_limit: number;
   suspended: boolean;
+  clipboard_sync: boolean;
+  usb_adb: boolean;
+  ble_advertise: boolean;
 }
 
 export interface AppInfo {
@@ -120,8 +142,9 @@ export type CoreEvent =
   | { type: "notification_apps"; peer_id: string; apps: AppEntry[] }
   | { type: "media_sessions"; peer_id: string; sessions: MediaSession[] }
   | { type: "share"; peer_id: string; kind: "text" | "link"; content: string }
+  | { type: "clipboard"; peer_id: string; content: string }
   | { type: "command_result"; peer_id: string; id: number; ok: boolean; error: string | null }
-  | { type: "request"; peer_id: string; message: unknown }
+  | { type: "request"; peer_id: string; message: StreamMessage | { t: string } }
   | { type: "transfer_incoming"; id: string; peer_id: string; files: { rel_path: string; size: number }[]; total_bytes: number }
   | { type: "transfer_progress"; id: string; outgoing: boolean; state: TransferState; bytes_done: number; total_bytes: number; speed_bps: number; eta_s: number | null; current_file: string | null }
   | { type: "transfer_file_done"; id: string; index: number; path: string | null; outcome: string }
@@ -163,4 +186,27 @@ export const api = {
   snapshot: () => invoke<{ status: Record<string, DeviceStatus>; media: Record<string, MediaSession[]>; live: PhoneNotification[] }>("snapshot"),
   defaultDownloadDir: () => invoke<string>("default_download_dir"),
   wipeAll: () => invoke<void>("wipe_all"),
+  mirrorSubscribe: (channel: Channel<ArrayBuffer>) => invoke<void>("mirror_subscribe", { channel }),
+  mirrorStart: (peerId: string, maxSize: number, bitrate: number, withAudio: boolean) =>
+    invoke<void>("mirror_start", { peerId, maxSize, bitrate, withAudio }),
+  mirrorStop: (peerId: string) => invoke<void>("mirror_stop", { peerId }),
+  mirrorKeyframe: (peerId: string) => invoke<void>("mirror_keyframe", { peerId }),
+  mirrorInput: (peerId: string, event: InputEvent) => invoke<void>("mirror_input", { peerId, event }),
+  phoneAudioStart: (peerId: string) => invoke<void>("phone_audio_start", { peerId }),
+  phoneAudioStop: (peerId: string) => invoke<void>("phone_audio_stop", { peerId }),
+  pcAudioStart: (peerId: string) => invoke<void>("pc_audio_start", { peerId }),
+  pcAudioStop: () => invoke<void>("pc_audio_stop"),
+  pcAudioActive: () => invoke<boolean>("pc_audio_active"),
+  usbStatus: () => invoke<UsbStatus | null>("usb_status"),
+  androidInstall: (serial: string | null) => invoke<string>("android_install", { serial }),
+  displayStatus: () => invoke<DisplayStatus>("display_status"),
+  displaySetup: (action: "install" | "uninstall" | "enable-testsigning") => invoke<string>("display_setup", { action }),
+  displayStart: (peerId: string, scale: number, quality: number, fps: number, portrait: boolean) =>
+    invoke<void>("display_start", { peerId, scale, quality, fps, portrait }),
+  displayStop: () => invoke<void>("display_stop"),
 };
+
+export interface DisplayStatus {
+  supported: boolean; installed: boolean; testsigning: boolean; active_peer: string | null;
+  width: number; height: number; setup_available: boolean;
+}

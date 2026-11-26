@@ -19,6 +19,12 @@ pub struct Settings {
     pub notification_history_limit: u32,
     /// Suspend toutes les connexions (bouton « pause » global).
     pub suspended: bool,
+    /// Synchronisation automatique du texte copié (désactivée par défaut : activation explicite).
+    pub clipboard_sync: bool,
+    /// Liaison USB via adb (débogage USB activé sur le téléphone).
+    pub usb_adb: bool,
+    /// Annonce Bluetooth Low Energy pour aider le téléphone à trouver le PC.
+    pub ble_advertise: bool,
 }
 
 impl Default for Settings {
@@ -33,6 +39,23 @@ impl Default for Settings {
             store_notification_content: true,
             notification_history_limit: 500,
             suspended: false,
+            clipboard_sync: false,
+            usb_adb: true,
+            ble_advertise: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_settings_json_gets_new_defaults() {
+        // Réglages enregistrés par la 0.1.0 (sans les nouveaux champs).
+        let s: Settings =
+            serde_json::from_str(r#"{"notifications_enabled":false,"suspended":true}"#).unwrap();
+        assert!(!s.notifications_enabled && s.suspended);
+        assert!(!s.clipboard_sync && s.usb_adb && s.ble_advertise);
     }
 }

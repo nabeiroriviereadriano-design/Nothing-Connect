@@ -1,0 +1,4 @@
+Ce dossier reçoit, lors de la compilation de l'installeur (CI), le pilote d'écran étendu
+NcDisplay (native/windows/display-driver/build-driver.ps1) : NcDisplay.inf, .dll, .cat,
+.cer et NcDisplaySetup.exe. Le pilote est dérivé d'un exemple Microsoft sous licence MS-PL
+(LICENSE-MS-PL.txt).

@@ -347,6 +347,222 @@ fn wipe_all(app: tauri::AppHandle, s: State<AppState>) -> R<()> {
     app.restart();
 }
 
+// ------------------------------------------------------------------ flux temps réel
+
+#[tauri::command]
+fn mirror_subscribe(
+    s: State<AppState>,
+    channel: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
+) {
+    *s.media.mirror.lock().unwrap() = Some(channel);
+}
+
+/// Demande au téléphone de diffuser son écran ; le téléphone affiche l'autorisation Android.
+#[tauri::command]
+fn mirror_start(
+    app: tauri::AppHandle,
+    s: State<AppState>,
+    peer_id: String,
+    max_size: u32,
+    bitrate: u32,
+    with_audio: bool,
+) -> R<()> {
+    let params = nc_core::protocol::StreamParams {
+        codec: Some("h264".into()),
+        max_size: Some(max_size.clamp(480, 2560)),
+        bitrate: Some(bitrate.clamp(1_000_000, 40_000_000)),
+        fps: Some(60),
+        with_audio: Some(with_audio),
+        ..Default::default()
+    };
+    s.node
+        .lock()
+        .unwrap()
+        .send(
+            &peer_id,
+            Message::StreamRequest {
+                kind: nc_core::protocol::StreamKind::Mirror,
+                params,
+            },
+        )
+        .map_err(e)?;
+    s.media.set_streaming(&app, true);
+    Ok(())
+}
+
+#[tauri::command]
+fn mirror_stop(app: tauri::AppHandle, s: State<AppState>, peer_id: String) -> R<()> {
+    s.media.player.lock().unwrap().take();
+    s.media.set_streaming(&app, false);
+    s.node
+        .lock()
+        .unwrap()
+        .send(
+            &peer_id,
+            Message::StreamStop {
+                kind: nc_core::protocol::StreamKind::Mirror,
+                reason: None,
+            },
+        )
+        .map_err(e)
+}
+
+#[tauri::command]
+fn mirror_keyframe(s: State<AppState>, peer_id: String) -> R<()> {
+    s.node
+        .lock()
+        .unwrap()
+        .send(
+            &peer_id,
+            Message::StreamKeyframe {
+                kind: nc_core::protocol::StreamKind::Mirror,
+            },
+        )
+        .map_err(e)
+}
+
+#[tauri::command]
+fn mirror_input(
+    s: State<AppState>,
+    peer_id: String,
+    event: nc_core::protocol::InputEvent,
+) -> R<()> {
+    s.node
+        .lock()
+        .unwrap()
+        .send(&peer_id, Message::Input(event))
+        .map_err(e)
+}
+
+/// Son du téléphone sur le PC, sans l'écran (le téléphone demande l'autorisation de capture).
+#[tauri::command]
+fn phone_audio_start(app: tauri::AppHandle, s: State<AppState>, peer_id: String) -> R<()> {
+    s.node
+        .lock()
+        .unwrap()
+        .send(
+            &peer_id,
+            Message::StreamRequest {
+                kind: nc_core::protocol::StreamKind::PhoneAudio,
+                params: Default::default(),
+            },
+        )
+        .map_err(e)?;
+    s.media.set_streaming(&app, true);
+    Ok(())
+}
+
+#[tauri::command]
+fn phone_audio_stop(app: tauri::AppHandle, s: State<AppState>, peer_id: String) -> R<()> {
+    s.media.player.lock().unwrap().take();
+    s.media.set_streaming(&app, false);
+    s.node
+        .lock()
+        .unwrap()
+        .send(
+            &peer_id,
+            Message::StreamStop {
+                kind: nc_core::protocol::StreamKind::PhoneAudio,
+                reason: None,
+            },
+        )
+        .map_err(e)
+}
+
+/// Son du PC vers le téléphone.
+#[tauri::command]
+fn pc_audio_start(app: tauri::AppHandle, s: State<AppState>, peer_id: String) -> R<()> {
+    s.media.start_pc_audio(&app, &peer_id)?;
+    s.media.set_streaming(&app, true);
+    Ok(())
+}
+
+#[tauri::command]
+fn pc_audio_stop(app: tauri::AppHandle, s: State<AppState>) {
+    s.media.stop_pc_audio(&app);
+    s.media.set_streaming(&app, false);
+}
+
+#[tauri::command]
+fn pc_audio_active(s: State<AppState>) -> bool {
+    s.media.capture.lock().unwrap().is_some()
+}
+
+// ------------------------------------------------------------------ USB
+
+#[tauri::command]
+fn usb_status() -> Option<crate::adb::UsbStatus> {
+    crate::adb::STATUS.lock().unwrap().clone()
+}
+
+/// Installe ou met à jour l'application Android par câble (contourne le blocage Play Protect
+/// des APK téléchargés, l'installation par adb n'étant pas concernée).
+#[tauri::command]
+async fn android_install(app: tauri::AppHandle, serial: Option<String>) -> R<String> {
+    tauri::async_runtime::spawn_blocking(move || crate::apkinstall::install(&app, serial))
+        .await
+        .map_err(e)?
+}
+
+// ------------------------------------------------------------------ écran étendu
+
+#[tauri::command]
+fn display_status(app: tauri::AppHandle, s: State<AppState>) -> crate::display::DisplayStatus {
+    s.media.display.status(&app)
+}
+
+/// `action` : « install », « uninstall » ou « enable-testsigning » (fenêtre UAC de Windows).
+#[tauri::command]
+async fn display_setup(app: tauri::AppHandle, action: String) -> R<String> {
+    if !matches!(
+        action.as_str(),
+        "install" | "uninstall" | "enable-testsigning"
+    ) {
+        return Err("action inconnue".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let st = tauri::Manager::state::<AppState>(&app);
+        st.media.display.setup(&app, &action)
+    })
+    .await
+    .map_err(e)?
+}
+
+/// Demande au téléphone d'ouvrir l'écran étendu ; le moniteur est branché quand il répond.
+#[tauri::command]
+fn display_start(
+    s: State<AppState>,
+    peer_id: String,
+    scale: f32,
+    quality: u8,
+    fps: u32,
+    portrait: bool,
+) -> R<()> {
+    s.media.display.set_quality(scale, quality, fps);
+    let params = nc_core::protocol::StreamParams {
+        codec: Some("jpeg".into()),
+        portrait: Some(portrait),
+        refresh_hz: Some(60),
+        ..Default::default()
+    };
+    s.node
+        .lock()
+        .unwrap()
+        .send(
+            &peer_id,
+            Message::StreamRequest {
+                kind: nc_core::protocol::StreamKind::Display,
+                params,
+            },
+        )
+        .map_err(e)
+}
+
+#[tauri::command]
+fn display_stop(app: tauri::AppHandle, s: State<AppState>) {
+    s.media.display.stop(&app);
+}
+
 pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         app_info,
@@ -379,5 +595,21 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         default_download_dir,
         snapshot,
         wipe_all,
+        mirror_subscribe,
+        mirror_start,
+        mirror_stop,
+        mirror_keyframe,
+        mirror_input,
+        phone_audio_start,
+        phone_audio_stop,
+        pc_audio_start,
+        pc_audio_stop,
+        pc_audio_active,
+        usb_status,
+        android_install,
+        display_status,
+        display_setup,
+        display_start,
+        display_stop,
     ]
 }

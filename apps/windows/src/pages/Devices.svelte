@@ -17,6 +17,13 @@
     const ok = await confirm(`Supprimer ${d.custom_name || d.name} ? Ses clés sont révoquées immédiatement : il faudra l'associer à nouveau.`, { title: "Supprimer l'appareil", kind: "warning", okLabel: "Supprimer", cancelLabel: "Garder" });
     if (ok) await app.run(api.removeDevice(d.id), "Appareil supprimé et révoqué");
   }
+  let installing = $state<string | null>(null);
+  async function installApk() {
+    installing = "Téléchargement…";
+    const v = await app.run(api.androidInstall(null));
+    installing = null;
+    if (v) app.toast(`Application Android ${v} installée sur le téléphone`);
+  }
   async function auto(d: DeviceRecord, on: boolean) {
     await app.run(api.setAutoAccept(d.id, on));
     app.refreshDevices();
@@ -29,6 +36,20 @@
     <button class="primary" onclick={() => (app.pairingOpen = true)}>Associer un téléphone</button>
   </div>
   <p class="muted">Seuls les appareils associés peuvent se connecter. Tout appareil inconnu est refusé.</p>
+
+  <section class="panel stack">
+    <h2>Installer l'application Android par câble</h2>
+    <p class="muted">Si Play Protect bloque l'installation du fichier .apk, installez-la depuis ce PC : la dernière version publiée est téléchargée, son empreinte vérifiée, puis installée par USB (vos réglages sont conservés lors d'une mise à jour).</p>
+    <ol class="muted small">
+      <li>Sur le téléphone : Paramètres › À propos › appuyez 7 fois sur « Numéro de build », puis Options pour les développeurs › Débogage USB.</li>
+      <li>Branchez le téléphone et acceptez « Autoriser le débogage USB ».</li>
+      <li>Sur ce PC : installez « SDK Platform-Tools » de Google (contient adb).</li>
+    </ol>
+    <div class="row">
+      <button class="primary" disabled={!!installing || !app.usb?.adb} onclick={installApk}>{installing ?? "Installer sur le téléphone branché"}</button>
+      {#if !app.usb?.adb}<span class="muted small">adb introuvable</span>{/if}
+    </div>
+  </section>
 
   {#each app.devices as d (d.id)}
     <article class="panel dev">
@@ -64,4 +85,5 @@
   dl { display: grid; grid-template-columns: 120px 1fr; gap: 6px 16px; margin: 0; }
   dt { color: var(--muted); }
   dd { margin: 0; }
+  ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 </style>

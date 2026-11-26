@@ -73,6 +73,14 @@
     <h2>Connexion</h2>
     <Toggle checked={s.suspended} label="Suspendre toutes les connexions" hint="Aucun téléphone ne peut se connecter tant que c'est activé." onchange={(v) => patch({ suspended: v })} />
     <Toggle checked={autostart} label="Démarrer avec Windows" hint="Démarre réduit dans la zone de notification." onchange={setAutostart} />
+    <Toggle checked={s.clipboard_sync} label="Synchroniser le presse-papiers" hint="Le texte copié sur le PC est envoyé au téléphone, et inversement depuis l'appli Android. Désactivé par défaut." onchange={(v) => patch({ clipboard_sync: v })} />
+    <Toggle checked={s.usb_adb} label="Liaison par câble USB" hint="Utilise adb (débogage USB) quand le téléphone est branché : liaison prioritaire sur le Wi-Fi." onchange={(v) => patch({ usb_adb: v })} />
+    <p class="muted small">
+      {#if !app.usb?.adb}adb introuvable : installez « SDK Platform-Tools » de Google pour la liaison USB.
+      {:else if !app.usb.devices.length}adb trouvé. Aucun téléphone branché en USB.
+      {:else}{#each app.usb.devices as [serial, state]}{serial} : {state === "device" ? (app.usb.tunneled.includes(serial) ? "liaison USB active" : "prêt") : state === "unauthorized" ? "acceptez « Autoriser le débogage USB » sur le téléphone" : state}. {/each}{/if}
+    </p>
+    <Toggle checked={s.ble_advertise} label="Annonce Bluetooth" hint="Aide le téléphone à trouver le PC si le réseau bloque la découverte. Pris en compte au prochain démarrage." onchange={(v) => patch({ ble_advertise: v })} />
     <p class="muted small">Réseau local uniquement, sans Internet ni compte. Port d'écoute : {app.info?.port ?? "—"}. Au premier lancement, autorisez NOTHING CONNECT dans le pare-feu Windows pour les réseaux privés.</p>
   </section>
 
