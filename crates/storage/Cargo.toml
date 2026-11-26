@@ -1,0 +1,18 @@
+[package]
+name = "nc-storage"
+description = "Persistance locale SQLite avec migrations versionnées"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+hex.workspace = true
+uuid.workspace = true
+nc-protocol.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

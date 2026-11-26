@@ -1,0 +1,23 @@
+[package]
+name = "nc-security"
+description = "Identité des appareils, empreintes et coffre de secrets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# Coffre natif Windows (Credential Manager / DPAPI).
+os-keyring = ["dep:keyring"]
+
+[dependencies]
+snow.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+zeroize = "1"
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"], optional = true }
+
+[dev-dependencies]

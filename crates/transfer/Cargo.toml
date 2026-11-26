@@ -1,0 +1,18 @@
+[package]
+name = "nc-transfer"
+description = "Moteur de transfert de fichiers : plan d'envoi, réception, reprise, SHA-256, conflits"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+serde.workspace = true
+nc-protocol.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+rand.workspace = true

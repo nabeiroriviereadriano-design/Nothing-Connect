@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = ["crates/protocol", "crates/security", "crates/pairing", "crates/storage", "crates/transport", "crates/transfer", "crates/core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.80"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+rand = "0.8"
+sha2 = "0.10"
+hkdf = "0.12"
+hex = "0.4"
+snow = "0.10"
+spake2 = "0.4"
+rusqlite = { version = "0.37", features = ["bundled"] }
+mdns-sd = "0.22"
+uuid = { version = "1", features = ["v4", "serde"] }
+tempfile = "3"
+
+nc-protocol = { path = "crates/protocol" }
+nc-security = { path = "crates/security" }
+nc-pairing = { path = "crates/pairing" }
+nc-transport = { path = "crates/transport" }
+nc-transfer = { path = "crates/transfer" }
+nc-storage = { path = "crates/storage" }
+nc-core = { path = "crates/core" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "unwind"

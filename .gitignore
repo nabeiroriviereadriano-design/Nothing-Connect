@@ -1,0 +1,11 @@
+target/
+node_modules/
+dist/
+*.ncpart
+apps/android/.gradle/
+apps/android/build/
+apps/android/app/build/
+apps/android/local.properties
+apps/windows/src-tauri/gen/
+*.keystore
+*.jks

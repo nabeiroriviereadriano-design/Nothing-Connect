@@ -1,0 +1,23 @@
+[package]
+name = "nc-transport"
+description = "Transport réseau local : canal chiffré Noise sur TCP, handshakes, découverte mDNS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["mdns"]
+mdns = ["dep:mdns-sd"]
+
+[dependencies]
+tokio.workspace = true
+snow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+nc-protocol.workspace = true
+nc-security.workspace = true
+nc-pairing.workspace = true
+mdns-sd = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

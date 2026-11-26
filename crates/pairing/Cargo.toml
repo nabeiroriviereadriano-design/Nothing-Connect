@@ -1,0 +1,13 @@
+[package]
+name = "nc-pairing"
+description = "Association par code / QR : SPAKE2, fenêtre d'association, URI QR"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+spake2.workspace = true
+hkdf.workspace = true
+sha2.workspace = true
+rand.workspace = true
+thiserror.workspace = true
