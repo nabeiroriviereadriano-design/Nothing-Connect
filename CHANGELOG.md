@@ -1,5 +1,10 @@
 # Notes de version
 
+## 0.3.1
+
+- Écran étendu : Windows plaçait souvent l'écran virtuel à 60 Hz même pour un téléphone à 90 ou 120 Hz, ce qui plafonnait l'affichage à 60 images/s. La fréquence du téléphone est maintenant imposée et vérifiée ; le compteur « Hz » de l'accueil affiche la fréquence réellement appliquée par Windows.
+- « Images par seconde » est réglé sur « Max » par défaut.
+
 ## 0.3.0
 
 - **Écran étendu beaucoup plus rapide** : vidéo H.264 au lieu d'images JPEG. Seules les différences entre images sont envoyées (débit divisé par 10 à 100 sur un bureau) et le téléphone décode avec son circuit vidéo matériel. Mesuré sur un bureau en 2400×1080 : 274 Ko par image en JPEG contre quelques Ko en H.264.

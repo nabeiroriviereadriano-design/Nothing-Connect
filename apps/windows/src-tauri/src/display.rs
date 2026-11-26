@@ -805,7 +805,7 @@ mod win {
 
     /// Règle la définition et la fréquence d'un écran (sans droits administrateur).
     /// Définition actuelle d'un écran.
-    fn current_mode(name: &[u16; 32]) -> Option<(u32, u32)> {
+    fn current_mode(name: &[u16; 32]) -> Option<(u32, u32, u32)> {
         use windows::Win32::Graphics::Gdi::{
             EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS,
         };
@@ -815,22 +815,26 @@ mod win {
         };
         unsafe { EnumDisplaySettingsW(PCWSTR(name.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm) }
             .as_bool()
-            .then_some((dm.dmPelsWidth, dm.dmPelsHeight))
+            .then_some((dm.dmPelsWidth, dm.dmPelsHeight, dm.dmDisplayFrequency))
     }
 
     /// Impose au moniteur virtuel le format exact du téléphone (sinon l'image n'occupe pas
-    /// tout l'écran du téléphone). Réessaie le temps que Windows publie le mode.
-    fn ensure_mode(name: &[u16; 32], w: u32, h: u32, hz: u32) -> bool {
+    /// tout l'écran du téléphone) **et sa fréquence** : Windows choisit sinon souvent 60 Hz,
+    /// ce qui plafonne l'écran étendu à 60 images/s. Réessaie le temps que Windows publie le mode.
+    /// Renvoie la fréquence réellement appliquée.
+    fn ensure_mode(name: &[u16; 32], w: u32, h: u32, hz: u32) -> Option<u32> {
+        // 119 Hz annoncé pour 119,88 : tolérance d'un hertz.
+        let ok = |m: Option<(u32, u32, u32)>| matches!(m, Some((mw, mh, mhz)) if mw == w && mh == h && mhz.abs_diff(hz) <= 1);
         for _ in 0..10 {
-            if current_mode(name) == Some((w, h)) {
-                return true;
+            if ok(current_mode(name)) {
+                return Some(hz);
             }
             set_mode(name, w, h, hz);
             std::thread::sleep(Duration::from_millis(300));
         }
         let got = current_mode(name);
-        tracing::warn!("écran virtuel en {got:?} au lieu de {w}×{h}");
-        got == Some((w, h))
+        tracing::warn!("écran virtuel en {got:?} au lieu de {w}×{h} à {hz} Hz");
+        got.map(|m| m.2)
     }
 
     fn set_mode(name: &[u16; 32], w: u32, h: u32, hz: u32) {
@@ -1118,7 +1122,9 @@ mod win {
                         };
                         let name = display_device_name(adapter);
                         if let (Some(n), false) = (name.as_ref(), mode_set) {
-                            ensure_mode(n, w, h, hz);
+                            if let Some(real) = ensure_mode(n, w, h, hz) {
+                                stats.hz.store(real, Ordering::Relaxed);
+                            }
                             mode_set = true;
                         }
                         reader = match backend {
@@ -1143,7 +1149,9 @@ mod win {
                             vdd::ADAPTER
                         };
                         if let Some(n) = display_device_name(adapter) {
-                            ensure_mode(&n, w, h, hz);
+                            if let Some(real) = ensure_mode(&n, w, h, hz) {
+                                stats.hz.store(real, Ordering::Relaxed);
+                            }
                         }
                     }
                     let mut bgra = Vec::new();
