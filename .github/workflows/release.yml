@@ -70,7 +70,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
       - run: cargo install cargo-ndk --locked
       - run: ./scripts/build-android-native.sh release
-      - name: Clé de signature (la même à chaque version : indispensable aux mises à jour)
+      - name: "Clé de signature (la même à chaque version, indispensable aux mises à jour)"
         working-directory: apps/android
         env:
           KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
