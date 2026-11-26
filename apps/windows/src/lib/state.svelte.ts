@@ -6,7 +6,7 @@ import {
   type StreamKind, type StreamParams, type UsbStatus,
 } from "./api";
 
-export type Page = "home" | "share" | "notifications" | "control" | "media" | "mirror" | "display" | "devices" | "settings";
+export type Page = "home" | "share" | "notifications" | "control" | "media" | "mirror" | "devices" | "settings";
 
 export interface LiveTransfer {
   id: string;

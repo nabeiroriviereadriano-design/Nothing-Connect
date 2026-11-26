@@ -90,6 +90,7 @@ class StatusReporter(private val ctx: Context) {
             val f = ctx.getSystemService(NotificationManager::class.java).currentInterruptionFilter
             o.put("dnd_enabled", f != NotificationManager.INTERRUPTION_FILTER_ALL && f != NotificationManager.INTERRUPTION_FILTER_UNKNOWN)
         }
+        runCatching { o.put("display_max_hz", io.github.nabeiroriviereadriano.nothingconnect.stream.DisplayActivity.maxRefreshRate(ctx)) }
         return o
     }
 }

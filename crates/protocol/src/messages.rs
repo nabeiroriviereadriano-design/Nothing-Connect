@@ -170,6 +170,9 @@ pub struct DeviceStatus {
     pub mobile_network: Option<String>,
     pub media_volume_percent: Option<u8>,
     pub dnd_enabled: Option<bool>,
+    /// Fréquence maximale de l'écran du téléphone (Hz), pour l'écran étendu.
+    #[serde(default)]
+    pub display_max_hz: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

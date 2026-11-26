@@ -625,6 +625,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02f0e023adb368345ce0ca6cdfc0f24a06554468d0e8503e14a0841de79bfa69"
 dependencies = [
  "find-msvc-tools",
+ "jobserver",
+ "libc",
  "shlex",
 ]
 
@@ -2685,6 +2687,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jobserver"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
+dependencies = [
+ "getrandom 0.4.3",
+ "libc",
+]
+
+[[package]]
 name = "jpeg-encoder"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3027,8 +3039,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nasm-rs"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "706bf8a5e8c8ddb99128c3291d31bd21f4bcde17f0f4c20ec678d85c74faa149"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "nc-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "hex",
  "nc-pairing",
@@ -3049,7 +3070,7 @@ dependencies = [
 
 [[package]]
 name = "nc-ffi"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "android_logger",
  "log",
@@ -3063,7 +3084,7 @@ dependencies = [
 
 [[package]]
 name = "nc-pairing"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "hkdf",
  "rand 0.8.8",
@@ -3074,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "nc-protocol"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3084,7 +3105,7 @@ dependencies = [
 
 [[package]]
 name = "nc-security"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "hex",
  "keyring",
@@ -3096,7 +3117,7 @@ dependencies = [
 
 [[package]]
 name = "nc-storage"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "hex",
  "nc-protocol",
@@ -3110,7 +3131,7 @@ dependencies = [
 
 [[package]]
 name = "nc-transfer"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "hex",
  "nc-protocol",
@@ -3124,7 +3145,7 @@ dependencies = [
 
 [[package]]
 name = "nc-transport"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "mdns-sd",
  "nc-pairing",
@@ -3238,7 +3259,7 @@ dependencies = [
 
 [[package]]
 name = "nothing-connect-windows"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arboard",
  "cpal",
@@ -3248,6 +3269,7 @@ dependencies = [
  "local-ip-address",
  "nc-core",
  "nc-security",
+ "openh264",
  "qrcode",
  "serde",
  "serde_json",
@@ -3646,6 +3668,27 @@ dependencies = [
  "dunce",
  "is-wsl",
  "libc",
+]
+
+[[package]]
+name = "openh264"
+version = "0.9.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a30840cd2b2cd6ae39af2544f66adf55357f68e0e4938a096fe0e9f8f412b59"
+dependencies = [
+ "openh264-sys2",
+ "wide",
+]
+
+[[package]]
+name = "openh264-sys2"
+version = "0.9.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8de206369120cab1be98e587adad1389e2ec00b63c62cdb3c13238000c1290a"
+dependencies = [
+ "cc",
+ "nasm-rs",
+ "walkdir",
 ]
 
 [[package]]
@@ -4427,6 +4470,15 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
+name = "safe_arch"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "same-file"
@@ -6610,6 +6662,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "998d2c24ec099a87daf9467808859f9d82b61f1d9c9701251aea037f514eae0e"
 dependencies = [
  "nom",
+]
+
+[[package]]
+name = "wide"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d920ac99c3c8edce110cb8d07dbb324d6d026011dce85b1e9355b70f0adacc4f"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]

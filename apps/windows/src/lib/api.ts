@@ -55,6 +55,7 @@ export interface DeviceStatus {
   mobile_network: string | null;
   media_volume_percent: number | null;
   dnd_enabled: boolean | null;
+  display_max_hz?: number | null;
 }
 
 export interface NotificationAction { index: number; title: string; accepts_text: boolean }
@@ -205,10 +206,14 @@ export const api = {
   displayStart: (peerId: string, scale: number, quality: number, fps: number, portrait: boolean) =>
     invoke<void>("display_start", { peerId, scale, quality, fps, portrait }),
   displayStop: () => invoke<void>("display_stop"),
+  displayTune: (scale: number, quality: number, fps: number) => invoke<void>("display_tune", { scale, quality, fps }),
+  uiPrefsGet: () => invoke<Record<string, unknown>>("ui_prefs_get"),
+  uiPrefsSet: (prefs: object) => invoke<void>("ui_prefs_set", { prefs }),
 };
 
 export interface DisplayStatus {
   supported: boolean; installed: boolean; testsigning: boolean; active_peer: string | null;
   width: number; height: number; setup_available: boolean;
   vdd_installed: boolean; backend: "nothing-connect" | "vdd" | null;
+  codec: "h264" | "jpeg" | null; fps: number; kbps: number; refresh_hz: number;
 }

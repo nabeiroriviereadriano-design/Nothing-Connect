@@ -97,10 +97,14 @@ impl Media {
                 params,
             } => {
                 let (w, h) = (params.width.unwrap_or(1920), params.height.unwrap_or(1080));
-                if let Err(e) =
-                    self.display
-                        .on_phone_ready(app, peer, w, h, params.refresh_hz.unwrap_or(60))
-                {
+                if let Err(e) = self.display.on_phone_ready(
+                    app,
+                    peer,
+                    w,
+                    h,
+                    params.refresh_hz.unwrap_or(60),
+                    params.codec.as_deref() == Some("h264"),
+                ) {
                     tracing::warn!("écran étendu : {e}");
                     let _ = app.state::<AppState>().node.lock().unwrap().send(
                         peer,

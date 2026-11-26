@@ -39,10 +39,10 @@ object Streams {
 
     fun init(ctx: Context) {
         app = ctx.applicationContext
-        Core.onStreamPacket { peer, kind, _, _, data ->
+        Core.onStreamPacket { peer, kind, flags, ts, data ->
             when (kind) {
                 Kind.PC_AUDIO -> if (peer == pcAudioPeer) pcAudio?.push(data)
-                Kind.DISPLAY -> DisplayActivity.onFrame(peer, data)
+                Kind.DISPLAY -> DisplayActivity.onFrame(peer, flags, ts, data)
             }
         }
     }
@@ -72,7 +72,11 @@ object Streams {
                 "pc_audio" -> stopPcAudio(sendStop = false)
             }
             "stream_keyframe" -> if (kind == "mirror") MirrorService.instance?.requestKeyframe()
-            "stream_start" -> if (kind == "pc_audio") startPcAudioPlayer(peer)
+            "stream_start" -> when (kind) {
+                "pc_audio" -> startPcAudioPlayer(peer)
+                // Le PC confirme le format de l'écran étendu (H.264 ou JPEG, définition réelle).
+                "display" -> DisplayActivity.onPcStart(peer, msg.optJSONObject("params") ?: JSONObject())
+            }
             "input" -> {
                 val c = ControlService.instance
                 if (c == null) {

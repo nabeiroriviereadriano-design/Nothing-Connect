@@ -35,6 +35,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      # Assembleur pour les routines optimisées de l'encodeur H.264 (OpenH264).
+      - uses: ilammy/setup-nasm@v1
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v5
         with: { node-version: 22, cache: npm, cache-dependency-path: apps/windows/package-lock.json }

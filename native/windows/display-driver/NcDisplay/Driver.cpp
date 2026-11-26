@@ -501,7 +501,7 @@ NTSTATUS IndirectDeviceContext::AddMonitor(const NcAddMonitor& Request)
     }
     Width = Request.width & ~1u;
     Height = Request.height & ~1u;
-    RefreshHz = (Request.refresh_hz >= 24 && Request.refresh_hz <= 120) ? Request.refresh_hz : 60;
+    RefreshHz = (Request.refresh_hz >= 24 && Request.refresh_hz <= 240) ? Request.refresh_hz : 60;
 
     WDF_OBJECT_ATTRIBUTES Attr;
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&Attr, IndirectMonitorContextWrapper);

@@ -4,6 +4,9 @@
   import { app } from "../lib/state.svelte";
   import { api, type InputEvent } from "../lib/api";
   import { codecString, concat } from "../lib/h264";
+  import { prefs, savePrefs } from "../lib/prefs.svelte";
+  import Segmented from "../components/Segmented.svelte";
+  import Toggle from "../components/Toggle.svelte";
 
   const CONFIG = 0x01;
   const KEYFRAME = 0x02;
@@ -14,9 +17,11 @@
   let config: Uint8Array | null = null;
   let waitingKey = true;
   let running = $state(false);
-  let quality = $state(1280);
-  let bitrate = $state(8_000_000);
-  let withAudio = $state(true);
+  let m = $derived(prefs.mirror);
+  function set<K extends keyof typeof prefs.mirror>(k: K, v: (typeof prefs.mirror)[K]) {
+    prefs.mirror[k] = v;
+    savePrefs();
+  }
   let fps = $state(0);
   let kbps = $state(0);
   let size = $state<{ w: number; h: number } | null>(null);
@@ -91,7 +96,7 @@
     delete app.streamStopped.mirror;
     resetDecoder();
     config = null;
-    const ok = await app.run(api.mirrorStart(peer, quality, bitrate, withAudio));
+    const ok = await app.run(api.mirrorStart(peer, m.maxSize, m.bitrate, m.withAudio));
     if (ok !== undefined) {
       running = true;
       app.toast("Acceptez la diffusion de l'écran sur le téléphone.");
@@ -190,23 +195,19 @@
   {:else if !running}
     <section class="panel stack">
       <p class="muted">Android demandera votre accord sur le téléphone à chaque démarrage. Les contenus protégés (vidéos avec DRM, applis bancaires) apparaissent en noir : c'est une protection du système.</p>
-      <div class="row wrap">
-        <label class="row small">Qualité
-          <select bind:value={quality}>
-            <option value={960}>Économique (960 px)</option>
-            <option value={1280}>Standard (1280 px)</option>
-            <option value={1920}>Haute (1920 px)</option>
-          </select>
-        </label>
-        <label class="row small">Débit
-          <select bind:value={bitrate}>
-            <option value={4_000_000}>4 Mb/s</option>
-            <option value={8_000_000}>8 Mb/s</option>
-            <option value={16_000_000}>16 Mb/s</option>
-          </select>
-        </label>
-        <label class="row small"><input type="checkbox" bind:checked={withAudio} /> Son du téléphone sur le PC</label>
+      <div class="settings">
+        <Segmented label="Définition" value={m.maxSize} onchange={(v) => set("maxSize", v)} options={[
+          { value: 960, label: "960 px", hint: "Économique" },
+          { value: 1280, label: "1280 px", hint: "Standard" },
+          { value: 1920, label: "1920 px", hint: "Haute" },
+        ]} />
+        <Segmented label="Débit" value={m.bitrate} onchange={(v) => set("bitrate", v)} options={[
+          { value: 4_000_000, label: "4 Mb/s" },
+          { value: 8_000_000, label: "8 Mb/s" },
+          { value: 16_000_000, label: "16 Mb/s" },
+        ]} />
       </div>
+      <Toggle label="Son du téléphone sur le PC" hint="Les applications qui l'interdisent restent muettes." checked={m.withAudio} onchange={(v) => set("withAudio", v)} />
       <div><button class="primary" disabled={!app.online} onclick={start}>Afficher l'écran</button></div>
     </section>
   {/if}
@@ -235,6 +236,7 @@
 
 <style>
   .page { gap: 18px; }
+  .settings { display: flex; flex-wrap: wrap; gap: 18px 28px; }
   .head { flex-wrap: wrap; }
   .wrap { flex-wrap: wrap; }
   .screen { display: flex; justify-content: center; background: var(--surface); border-radius: var(--r-big); padding: 16px; }

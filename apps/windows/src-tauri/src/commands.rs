@@ -506,6 +506,28 @@ async fn android_install(app: tauri::AppHandle, serial: Option<String>) -> R<Str
 
 // ------------------------------------------------------------------ écran étendu
 
+/// Réglages de l'interface (écran étendu, miroir…) : enregistrés à chaque changement,
+/// conservés après les mises à jour.
+#[tauri::command]
+fn ui_prefs_get(s: State<AppState>) -> serde_json::Value {
+    std::fs::read(s.data_dir.join("ui-prefs.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+#[tauri::command]
+fn ui_prefs_set(s: State<AppState>, prefs: serde_json::Value) -> R<()> {
+    if !prefs.is_object() {
+        return Err("réglages invalides".into());
+    }
+    // Écriture atomique : fichier temporaire puis renommage.
+    let path = s.data_dir.join("ui-prefs.json");
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&prefs).map_err(e)?).map_err(e)?;
+    std::fs::rename(&tmp, &path).map_err(e)
+}
+
 #[tauri::command]
 fn display_status(app: tauri::AppHandle, s: State<AppState>) -> crate::display::DisplayStatus {
     s.media.display.status(&app)
@@ -558,6 +580,12 @@ fn display_start(
         .map_err(e)
 }
 
+/// Qualité et fréquence modifiées pendant une session : appliquées sans débrancher l'écran.
+#[tauri::command]
+fn display_tune(s: State<AppState>, scale: f32, quality: u8, fps: u32) {
+    s.media.display.set_quality(scale, quality, fps);
+}
+
 #[tauri::command]
 fn display_stop(app: tauri::AppHandle, s: State<AppState>) {
     s.media.display.stop(&app);
@@ -608,8 +636,11 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         usb_status,
         android_install,
         display_status,
+        ui_prefs_get,
+        ui_prefs_set,
         display_setup,
         display_start,
         display_stop,
+        display_tune,
     ]
 }

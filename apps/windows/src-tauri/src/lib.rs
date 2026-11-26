@@ -8,6 +8,7 @@ mod ble;
 mod clipboard;
 mod commands;
 mod display;
+mod h264enc;
 mod media;
 mod secrets;
 mod sink;

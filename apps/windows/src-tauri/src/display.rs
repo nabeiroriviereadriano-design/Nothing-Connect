@@ -97,6 +97,22 @@ pub struct DisplayStatus {
     pub vdd_installed: bool,
     /// Pilote utilisé : « nothing-connect », « vdd » ou absent.
     pub backend: Option<String>,
+    /// Mesures en direct de la session : format, images par seconde envoyées, débit.
+    pub codec: Option<String>,
+    pub fps: u32,
+    pub kbps: u32,
+    /// Fréquence de l'écran virtuel (celle du téléphone).
+    pub refresh_hz: u32,
+}
+
+/// Compteurs de la session en cours (mis à jour chaque seconde par le fil de capture).
+#[derive(Default)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub struct LiveStats {
+    pub fps: std::sync::atomic::AtomicU32,
+    pub kbps: std::sync::atomic::AtomicU32,
+    pub h264: std::sync::atomic::AtomicBool,
+    pub hz: std::sync::atomic::AtomicU32,
 }
 
 #[cfg(windows)]
@@ -127,6 +143,7 @@ mod stub {
             _w: u32,
             _h: u32,
             _hz: u32,
+            _h264: bool,
         ) -> Result<(), String> {
             Err("L'écran étendu n'est disponible que sous Windows.".into())
         }
@@ -753,6 +770,7 @@ mod win {
     pub struct Display {
         active: Mutex<Option<Active>>,
         force_frame: Arc<AtomicBool>,
+        stats: Arc<super::LiveStats>,
         /// Échelle de la résolution (100 = taille réelle du téléphone), qualité JPEG, images/s.
         scale_pct: AtomicU32,
         quality: Arc<AtomicU8>,
@@ -765,6 +783,7 @@ mod win {
             Self {
                 active: Mutex::new(None),
                 force_frame: Arc::new(AtomicBool::new(false)),
+                stats: Arc::new(super::LiveStats::default()),
                 scale_pct: AtomicU32::new(75),
                 quality: Arc::new(AtomicU8::new(70)),
                 fps: Arc::new(AtomicU32::new(30)),
@@ -897,7 +916,11 @@ mod win {
                 .store((scale.clamp(0.25, 1.0) * 100.0) as u32, Ordering::SeqCst);
             self.quality
                 .store(jpeg_quality.clamp(30, 95), Ordering::SeqCst);
-            self.fps.store(fps.clamp(5, 60), Ordering::SeqCst);
+            // 0 = fréquence maximale annoncée par le téléphone.
+            self.fps.store(
+                if fps == 0 { 0 } else { fps.clamp(5, 240) },
+                Ordering::SeqCst,
+            );
         }
 
         pub fn status(&self, app: &AppHandle) -> DisplayStatus {
@@ -935,6 +958,26 @@ mod win {
                 } else {
                     None
                 },
+                codec: a.as_ref().map(|_| {
+                    if self.stats.h264.load(Ordering::Relaxed) {
+                        "h264"
+                    } else {
+                        "jpeg"
+                    }
+                    .into()
+                }),
+                fps: a
+                    .as_ref()
+                    .map(|_| self.stats.fps.load(Ordering::Relaxed))
+                    .unwrap_or(0),
+                kbps: a
+                    .as_ref()
+                    .map(|_| self.stats.kbps.load(Ordering::Relaxed))
+                    .unwrap_or(0),
+                refresh_hz: a
+                    .as_ref()
+                    .map(|_| self.stats.hz.load(Ordering::Relaxed))
+                    .unwrap_or(0),
             }
         }
 
@@ -976,6 +1019,7 @@ mod win {
             w: u32,
             h: u32,
             hz: u32,
+            h264: bool,
         ) -> Result<(), String> {
             let backend = if interface_path().is_some() {
                 Backend::Own
@@ -1000,7 +1044,7 @@ mod win {
                 .min(1.0);
             w = ((w as f32 * k) as u32).max(320) & !1;
             h = ((h as f32 * k) as u32).max(320) & !1;
-            let hz = hz.clamp(30, 120);
+            let hz = hz.clamp(30, 240);
             match backend {
                 Backend::Own => {
                     let mut req = Vec::with_capacity(12);
@@ -1030,10 +1074,12 @@ mod win {
                 backend,
             });
             *self.rect.lock().unwrap() = None;
+            // H.264 si le téléphone sait le décoder (version 0.3+), sinon JPEG image par image.
             let params = StreamParams {
-                codec: Some("jpeg".into()),
+                codec: Some(if h264 { "h264" } else { "jpeg" }.into()),
                 width: Some(w),
                 height: Some(h),
+                refresh_hz: Some(hz),
                 ..Default::default()
             };
             let _ = app.state::<AppState>().node.lock().unwrap().send(
@@ -1044,13 +1090,18 @@ mod win {
                 },
             );
 
-            let (app2, peer2, force, quality, fps) = (
+            let (app2, peer2, force, quality, fps, stats) = (
                 app.clone(),
                 peer.to_string(),
                 self.force_frame.clone(),
                 self.quality.clone(),
                 self.fps.clone(),
+                self.stats.clone(),
             );
+            stats.h264.store(h264, Ordering::Relaxed);
+            stats.hz.store(hz, Ordering::Relaxed);
+            stats.fps.store(0, Ordering::Relaxed);
+            stats.kbps.store(0, Ordering::Relaxed);
             std::thread::Builder::new()
                 .name("nc-display".into())
                 .spawn(move || {
@@ -1097,14 +1148,62 @@ mod win {
                     }
                     let mut bgra = Vec::new();
                     let mut jpeg = Vec::with_capacity(512 * 1024);
+                    let mut enc: Option<crate::h264enc::H264> = None;
+                    let mut enc_q = 0u8;
                     let mut last_sent = Instant::now() - Duration::from_secs(10);
                     let t0 = Instant::now();
+                    // Mesures : images et octets envoyés pendant la dernière seconde.
+                    let counters = std::cell::Cell::new((0u32, 0u64, Instant::now()));
+                    let send = |flags: u8, data: &[u8]| -> bool {
+                        let ts = t0.elapsed().as_micros() as u64;
+                        let st = app2.state::<AppState>();
+                        let ok = st.node.lock().unwrap().send_stream(
+                            &peer2,
+                            StreamKind::Display,
+                            flags,
+                            ts,
+                            data,
+                        );
+                        if ok {
+                            let (mut n, mut b, since) = counters.get();
+                            b += data.len() as u64;
+                            if flags & crate::h264enc::CONFIG == 0 {
+                                n += 1;
+                            }
+                            let el = since.elapsed();
+                            if el >= Duration::from_secs(1) {
+                                stats.fps.store(
+                                    (n as f64 / el.as_secs_f64()).round() as u32,
+                                    Ordering::Relaxed,
+                                );
+                                stats.kbps.store(
+                                    (b as f64 * 8.0 / 1000.0 / el.as_secs_f64()) as u32,
+                                    Ordering::Relaxed,
+                                );
+                                counters.set((0, 0, Instant::now()));
+                            } else {
+                                counters.set((n, b, since));
+                            }
+                        }
+                        ok
+                    };
                     while !stop.load(Ordering::SeqCst) {
-                        let interval =
-                            Duration::from_millis(1000 / fps.load(Ordering::Relaxed).max(1) as u64);
-                        // Image de rappel toutes les 2 s (téléphone qui rouvre l'écran) ou sur demande.
-                        let forced = force.swap(false, Ordering::SeqCst)
-                            || last_sent.elapsed() > Duration::from_secs(2);
+                        // Écran immobile : rien n'est envoyé, les mesures retombent à zéro.
+                        if counters.get().2.elapsed() > Duration::from_millis(1500) {
+                            stats.fps.store(0, Ordering::Relaxed);
+                            stats.kbps.store(0, Ordering::Relaxed);
+                            counters.set((0, 0, Instant::now()));
+                        }
+                        // 0 = fréquence maximale du téléphone.
+                        let f = match fps.load(Ordering::Relaxed) {
+                            0 => hz,
+                            f => f,
+                        };
+                        let interval = Duration::from_micros(1_000_000 / f.max(1) as u64);
+                        // JPEG : image de rappel toutes les 2 s. H.264 : image clé seulement sur demande.
+                        let asked = force.swap(false, Ordering::SeqCst);
+                        let forced =
+                            asked || (!h264 && last_sent.elapsed() > Duration::from_secs(2));
                         let Some((w, h)) =
                             reader.next(&mut bgra, Duration::from_millis(100), forced)
                         else {
@@ -1113,22 +1212,72 @@ mod win {
                         if last_sent.elapsed() < interval {
                             std::thread::sleep(interval - last_sent.elapsed());
                         }
-                        if encode_jpeg(&bgra, w, h, quality.load(Ordering::Relaxed), &mut jpeg)
-                            .is_err()
-                        {
+                        let q = quality.load(Ordering::Relaxed);
+                        if !h264 {
+                            if encode_jpeg(&bgra, w, h, q, &mut jpeg).is_ok()
+                                && send(nc_core::protocol::stream_flags::KEYFRAME, &jpeg)
+                            {
+                                last_sent = Instant::now();
+                            }
                             continue;
                         }
-                        let ts = t0.elapsed().as_micros() as u64;
-                        let st = app2.state::<AppState>();
-                        let sent = st.node.lock().unwrap().send_stream(
-                            &peer2,
-                            StreamKind::Display,
-                            nc_core::protocol::stream_flags::KEYFRAME,
-                            ts,
-                            &jpeg,
-                        );
-                        if sent {
-                            last_sent = Instant::now();
+                        // (Re)création de l'encodeur si la définition, la qualité ou la fréquence change.
+                        let size = crate::h264enc::H264::even(w, h);
+                        if enc.as_ref().map(|e| e.size() != size).unwrap_or(true) || enc_q != q {
+                            let rate = crate::h264enc::bitrate_for(size.0, size.1, f, q);
+                            match crate::h264enc::H264::new(size.0, size.1, f, rate) {
+                                Ok(e) => {
+                                    enc = Some(e);
+                                    enc_q = q;
+                                    tracing::info!(
+                                        "écran étendu : H.264 {}×{} à {f} i/s, {} kbit/s",
+                                        size.0,
+                                        size.1,
+                                        rate / 1000
+                                    );
+                                    let st = app2.state::<AppState>();
+                                    let _ = st.node.lock().unwrap().send(
+                                        &peer2,
+                                        Message::StreamStart {
+                                            kind: StreamKind::Display,
+                                            params: StreamParams {
+                                                codec: Some("h264".into()),
+                                                width: Some(size.0),
+                                                height: Some(size.1),
+                                                refresh_hz: Some(hz),
+                                                ..Default::default()
+                                            },
+                                        },
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!("{e}");
+                                    std::thread::sleep(Duration::from_millis(500));
+                                    continue;
+                                }
+                            }
+                        }
+                        let Some(e) = enc.as_mut() else { continue };
+                        if asked {
+                            e.force_keyframe();
+                        }
+                        match e.encode_bgra(&bgra, w) {
+                            Ok(packets) => {
+                                let mut ok = true;
+                                for (flags, data) in &packets {
+                                    if !send(*flags, data) {
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                                if ok {
+                                    last_sent = Instant::now();
+                                } else {
+                                    // Image perdue (réseau saturé) : la suivante repart d'une image clé.
+                                    e.force_keyframe();
+                                }
+                            }
+                            Err(err) => tracing::warn!("{err}"),
                         }
                     }
                 })

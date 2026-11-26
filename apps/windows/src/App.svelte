@@ -13,21 +13,26 @@
   import Devices from "./pages/Devices.svelte";
   import SettingsPage from "./pages/Settings.svelte";
   import Mirror from "./pages/Mirror.svelte";
-  import Display from "./pages/Display.svelte";
+  import Icon, { type IconName } from "./components/Icon.svelte";
+  import Logo from "./components/Logo.svelte";
+  import { loadPrefs } from "./lib/prefs.svelte";
   import PairingDialog from "./components/PairingDialog.svelte";
   import PairingRequest from "./components/PairingRequest.svelte";
   import { pickAndSend } from "./lib/send";
 
-  const NAV: { id: Page; label: string }[] = [
-    { id: "home", label: "Accueil" },
-    { id: "share", label: "Partage" },
-    { id: "notifications", label: "Notifications" },
-    { id: "control", label: "Centre de contrôle" },
-    { id: "media", label: "Multimédia" },
-    { id: "mirror", label: "Écran du téléphone" },
-    { id: "display", label: "Écran étendu" },
-    { id: "devices", label: "Appareils" },
-    { id: "settings", label: "Paramètres" },
+  type NavItem = { id: Page; label: string; icon: IconName };
+  // L'écran étendu se pilote depuis l'accueil.
+  const NAV: NavItem[] = [
+    { id: "home", label: "Accueil", icon: "home" },
+    { id: "share", label: "Partage", icon: "share" },
+    { id: "notifications", label: "Notifications", icon: "bell" },
+    { id: "mirror", label: "Écran du téléphone", icon: "phone" },
+    { id: "media", label: "Multimédia", icon: "play" },
+    { id: "control", label: "Centre de contrôle", icon: "sliders" },
+  ];
+  const NAV_BOTTOM: NavItem[] = [
+    { id: "devices", label: "Appareils", icon: "link" },
+    { id: "settings", label: "Paramètres", icon: "gear" },
   ];
 
   let dragging = $state(false);
@@ -44,7 +49,7 @@
 
   onMount(() => {
     const un: (() => void)[] = [];
-    app.init().then(() => (ready = true));
+    Promise.all([app.init(), loadPrefs()]).then(() => (ready = true));
     getCurrentWebview()
       .onDragDropEvent((e) => {
         if (e.payload.type === "over" || e.payload.type === "enter") dragging = true;
@@ -63,46 +68,58 @@
   });
 
   let unread = $derived(app.live.length);
+  let battery = $derived(app.selected ? app.status[app.selected]?.battery_percent ?? null : null);
   let activeTransfers = $derived(Object.values(app.transfers).filter((t) => ["running", "offered", "paused"].includes(t.state)).length + app.incoming.length);
 </script>
 
 <div class="shell">
   <aside>
-    <div class="brand dot">NOTHING<br />CONNECT</div>
+    <div class="brand">
+      <Logo height={20} />
+      <span class="dot word">NOTHING<br />CONNECT</span>
+    </div>
 
     <div class="device">
       {#if app.devices.length > 1}
-        <label class="muted small" for="dev">Téléphone</label>
-        <select id="dev" bind:value={app.selected}>
+        <select aria-label="Téléphone" bind:value={app.selected}>
           {#each app.devices as d}
             <option value={d.id}>{d.custom_name || d.name}</option>
           {/each}
         </select>
       {/if}
       {#if app.device}
-        <div class="row small">
-          <span class={app.online ? "live" : "idle"}></span>
-          <span class="ellipsis">{app.device.custom_name || app.device.name}</span>
+        <span class="ellipsis dname">{app.device.custom_name || app.device.name}</span>
+        <div class="chips">
+          <span class="chip" class:live-chip={app.online}>
+            <span class={app.online ? "live" : "idle"}></span>
+            {app.online ? (app.link?.link === "usb" ? "USB" : "Wi-Fi") : app.refused[app.device.id] ? "Révoqué" : "Hors ligne"}
+          </span>
+          {#if app.online && battery != null}<span class="chip"><span class="dot">{battery}</span>%</span>{/if}
         </div>
-        <span class="muted small">{app.online ? (app.link?.link === "usb" ? "Connecté par câble USB" : "Connecté sur le réseau local") : app.refused[app.device.id] ? "Association révoquée" : "Hors ligne"}</span>
       {:else}
         <span class="muted small">Aucun téléphone associé</span>
       {/if}
     </div>
 
+    {#snippet item(n: NavItem)}
+      <button class="nav" class:active={app.page === n.id} aria-current={app.page === n.id ? "page" : undefined} onclick={() => (app.page = n.id)}>
+        <Icon name={n.icon} />
+        <span class="grow">{n.label}</span>
+        {#if n.id === "notifications" && unread > 0}<span class="count">{unread}</span>{/if}
+        {#if n.id === "share" && activeTransfers > 0}<span class="count">{activeTransfers}</span>{/if}
+      </button>
+    {/snippet}
+
     <nav aria-label="Modules">
-      {#each NAV as n}
-        <button class="nav" class:active={app.page === n.id} aria-current={app.page === n.id ? "page" : undefined} onclick={() => (app.page = n.id)}>
-          <span>{n.label}</span>
-          {#if n.id === "notifications" && unread > 0}<span class="count">{unread}</span>{/if}
-          {#if n.id === "share" && activeTransfers > 0}<span class="count">{activeTransfers}</span>{/if}
-        </button>
-      {/each}
+      {#each NAV as n}{@render item(n)}{/each}
     </nav>
 
-    {#if app.settings?.suspended}
-      <p class="suspended small">Connexions suspendues</p>
-    {/if}
+    <nav class="bottom" aria-label="Réglages">
+      {#if app.settings?.suspended}
+        <p class="suspended small">Connexions suspendues</p>
+      {/if}
+      {#each NAV_BOTTOM as n}{@render item(n)}{/each}
+    </nav>
   </aside>
 
   <main>
@@ -119,7 +136,6 @@
       {:else if app.page === "control"}<Control />
       {:else if app.page === "media"}<Media />
       {:else if app.page === "mirror"}<Mirror />
-      {:else if app.page === "display"}<Display />
       {:else if app.page === "devices"}<Devices />
       {:else}<SettingsPage />{/if}
     {/if}
@@ -143,16 +159,24 @@
 </div>
 
 <style>
-  .shell { display: grid; grid-template-columns: 232px 1fr; height: 100%; }
-  aside { border-right: 1px solid var(--line); padding: 28px 18px; display: flex; flex-direction: column; gap: 28px; overflow-y: auto; }
-  .brand { font-size: 24px; line-height: 1.05; }
-  .device { display: flex; flex-direction: column; gap: 6px; }
+  .shell { display: grid; grid-template-columns: 240px 1fr; height: 100%; }
+  aside { background: #080808; border-right: 1px solid var(--line); padding: 24px 14px 18px; display: flex; flex-direction: column; gap: 22px; overflow-y: auto; }
+  .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px; }
+  .word { font-size: 13px; line-height: 1.05; letter-spacing: 0.06em; }
+  .device { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--surface); border-radius: var(--r-mid); }
+  .dname { font-weight: 500; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 9px; border-radius: var(--r-pill); border: 1px solid var(--line); color: var(--muted); }
+  .chip.live-chip { color: var(--white); }
+  .chip .dot { font-size: 13px; color: var(--white); }
   nav { display: flex; flex-direction: column; gap: 2px; }
-  .nav { display: flex; justify-content: space-between; align-items: center; text-align: left; background: transparent; border-color: transparent; border-radius: 12px; padding: 11px 12px; color: var(--muted); }
-  .nav:hover { color: var(--white); border-color: transparent; background: var(--surface); }
-  .nav.active { color: var(--white); background: var(--surface-2); }
+  nav.bottom { margin-top: auto; }
+  .nav { display: flex; gap: 12px; align-items: center; text-align: left; background: transparent; border-color: transparent; border-radius: 12px; padding: 10px 12px; color: var(--muted); }
+  .nav:hover:not(.active) { color: var(--white); border-color: transparent; background: var(--surface); }
+  .nav.active, .nav.active:hover { color: var(--white); background: var(--surface-2); border-color: transparent; }
+  .nav.active :global(svg) { color: var(--red); }
   .count { font-size: 12px; min-width: 22px; text-align: center; padding: 2px 6px; border-radius: 10px; background: var(--red); color: var(--white); }
-  .suspended { margin-top: auto; color: var(--red); }
+  .suspended { color: var(--red); padding: 0 12px 6px; }
   main { overflow-y: auto; padding: 36px 44px 60px; }
   main > :global(*) { max-width: 960px; }
   .update { background: var(--surface); border-radius: var(--r-mid); padding: 12px 12px 12px 18px; margin-bottom: 24px; }

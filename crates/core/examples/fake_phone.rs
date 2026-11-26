@@ -124,6 +124,7 @@ fn send_all(node: &Node, peer: &str, volume: u8, dnd: bool) {
             mobile_network: Some("Free 5G".into()),
             media_volume_percent: Some(volume),
             dnd_enabled: Some(dnd),
+            display_max_hz: Some(120),
         }),
     );
     let _ = node.send(
