@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/protocol", "crates/security", "crates/pairing", "crates/storage", "crates/transport", "crates/transfer", "crates/core"]
+members = ["crates/protocol", "crates/security", "crates/pairing", "crates/storage", "crates/transport", "crates/transfer", "crates/core", "crates/ffi"]
 
 [workspace.package]
 version = "0.1.0"
@@ -28,7 +28,7 @@ tempfile = "3"
 nc-protocol = { path = "crates/protocol" }
 nc-security = { path = "crates/security" }
 nc-pairing = { path = "crates/pairing" }
-nc-transport = { path = "crates/transport" }
+nc-transport = { path = "crates/transport", default-features = false }
 nc-transfer = { path = "crates/transfer" }
 nc-storage = { path = "crates/storage" }
 nc-core = { path = "crates/core" }

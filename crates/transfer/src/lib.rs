@@ -62,10 +62,23 @@ impl SourceFile {
 /// Construit la liste des fichiers d'un envoi (les dossiers sont parcourus récursivement,
 /// les liens symboliques ignorés pour ne pas sortir du dossier choisi).
 pub fn plan(inputs: &[PathBuf]) -> Result<Vec<SourceFile>> {
+    let named: Vec<(PathBuf, Option<String>)> = inputs.iter().map(|p| (p.clone(), None)).collect();
+    plan_named(&named)
+}
+
+/// Comme [`plan`], avec un nom d'affichage optionnel par entrée (Android : un descripteur
+/// `/proc/self/fd/N` ouvert depuis un `content://` porte le nom fourni par le système).
+/// Les entrées choisies explicitement suivent les liens ; le contenu des dossiers, non.
+pub fn plan_named(inputs: &[(PathBuf, Option<String>)]) -> Result<Vec<SourceFile>> {
     let mut out = Vec::new();
-    for p in inputs {
-        let meta = fs::symlink_metadata(p)?;
-        let base_name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "fichier".into());
+    for (p, name) in inputs {
+        let meta = fs::metadata(p)?;
+        let base_name = name
+            .clone()
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "fichier".into());
+        let base_name = base_name.replace(['/', '\\'], "_");
         if meta.is_file() {
             out.push(source(p, base_name, &meta));
         } else if meta.is_dir() {

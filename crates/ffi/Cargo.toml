@@ -1,0 +1,25 @@
+[package]
+name = "nc-ffi"
+description = "Liaison UniFFI du cœur NOTHING CONNECT pour Android (Kotlin)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "nc_ffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+uniffi = { version = "0.29", features = ["cli"] }
+nc-core = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15"
+log = "0.4"

@@ -349,8 +349,14 @@ impl Node {
 
     // ------------------------------------------------------------------ transferts
 
+    /// Envoie des fichiers et/ou dossiers.
     pub fn send_paths(&self, peer_id: &str, paths: Vec<PathBuf>) -> Result<Uuid> {
-        crate::transfers::send_paths(&self.inner, self.rt().handle(), peer_id, paths)
+        self.send_named(peer_id, paths.into_iter().map(|p| (p, None)).collect())
+    }
+
+    /// Envoie des entrées avec un nom d'affichage (Android : descripteurs ouverts).
+    pub fn send_named(&self, peer_id: &str, inputs: Vec<(PathBuf, Option<String>)>) -> Result<Uuid> {
+        crate::transfers::send_named(&self.inner, peer_id, inputs)
     }
 
     pub fn accept_transfer(&self, id: &Uuid, accept: bool) -> Result<()> {

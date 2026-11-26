@@ -174,9 +174,9 @@ fn record(ctl: &TransferCtl, state: TransferState) -> TransferRecord {
 
 // ---------------------------------------------------------------- envoi
 
-pub(crate) fn send_paths(inner: &Arc<Inner>, _rt: &tokio::runtime::Handle, peer_id: &str, paths: Vec<PathBuf>) -> Result<Uuid> {
+pub(crate) fn send_named(inner: &Arc<Inner>, peer_id: &str, inputs: Vec<(PathBuf, Option<String>)>) -> Result<Uuid> {
     let session = inner.session(peer_id).ok_or(CoreError::NotConnected)?;
-    let sources = nc_transfer::plan(&paths)?;
+    let sources = nc_transfer::plan_named(&inputs)?;
     if sources.is_empty() {
         return Err(CoreError::InvalidState);
     }
