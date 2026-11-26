@@ -49,6 +49,36 @@ pub fn to_virtual_desk(
     (ax.clamp(0, 65535), ay.clamp(0, 65535))
 }
 
+/// Fixe `<monitors><count>N</count>` dans le fichier de réglages de Virtual Display Driver.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn set_xml_count(xml: &str, count: u32) -> String {
+    let Some(m) = xml.find("<monitors>") else {
+        return xml.to_string();
+    };
+    let rest = &xml[m..];
+    let (Some(a), Some(b)) = (rest.find("<count>"), rest.find("</count>")) else {
+        return xml.to_string();
+    };
+    format!("{}{}<count>{count}{}", &xml[..m], &rest[..a], &rest[b..])
+}
+
+/// Ajoute une résolution à `<resolutions>` si elle n'y est pas déjà.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn ensure_xml_resolution(xml: &str, w: u32, h: u32, hz: u32) -> String {
+    let needle = format!("<width>{w}</width>\n            <height>{h}</height>");
+    let compact = format!("<width>{w}</width><height>{h}</height>");
+    if xml.contains(&needle) || xml.replace(char::is_whitespace, "").contains(&compact) {
+        return xml.to_string();
+    }
+    let Some(i) = xml.find("</resolutions>") else {
+        return xml.to_string();
+    };
+    let entry = format!(
+        "    <resolution>\n            <width>{w}</width>\n            <height>{h}</height>\n            <refresh_rate>{hz}</refresh_rate>\n        </resolution>\n    "
+    );
+    format!("{}{entry}{}", &xml[..i], &xml[i..])
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct DisplayStatus {
     /// Fonction disponible sur ce système (Windows uniquement).
@@ -63,6 +93,10 @@ pub struct DisplayStatus {
     pub height: u32,
     /// Outil d'installation présent dans l'application.
     pub setup_available: bool,
+    /// Pilote libre et signé « Virtual Display Driver » détecté (alternative sans signature de test).
+    pub vdd_installed: bool,
+    /// Pilote utilisé : « nothing-connect », « vdd » ou absent.
+    pub backend: Option<String>,
 }
 
 #[cfg(windows)]
@@ -413,11 +447,285 @@ mod win {
         }
     }
 
+    // ------------------------------------------------------------------ pilote « Virtual Display Driver »
+    //
+    // Pilote IddCx libre (MIT, github.com/VirtualDrivers/Virtual-Display-Driver), signé et
+    // installable sans mode test. Il est piloté par son tube nommé et son fichier de réglages ;
+    // l'image de l'écran est capturée avec l'API Desktop Duplication de Windows.
+    mod vdd {
+        use std::io::Write;
+        use std::path::PathBuf;
+
+        pub const ADAPTER: &str = "Virtual Display Driver";
+        const PIPE: &str = r"\\.\pipe\MTTVirtualDisplayPipe";
+
+        pub fn present() -> bool {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(PIPE)
+                .is_ok()
+        }
+
+        pub fn command(cmd: &str) -> Result<(), String> {
+            let mut p = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(PIPE)
+                .map_err(|e| format!("pilote Virtual Display Driver injoignable : {e}"))?;
+            let bytes: Vec<u8> = cmd
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .flat_map(|c| c.to_le_bytes())
+                .collect();
+            p.write_all(&bytes).map_err(|e| e.to_string())
+        }
+
+        fn settings_path() -> PathBuf {
+            use windows::core::PCWSTR;
+            use windows::Win32::System::Registry::{
+                RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ,
+            };
+            let key: Vec<u16> = "SOFTWARE\\MikeTheTech\\VirtualDisplayDriver\0"
+                .encode_utf16()
+                .collect();
+            let val: Vec<u16> = "VDDPATH\0".encode_utf16().collect();
+            let mut buf = vec![0u16; 520];
+            let mut size = (buf.len() * 2) as u32;
+            let ok = unsafe {
+                RegGetValueW(
+                    HKEY_LOCAL_MACHINE,
+                    PCWSTR(key.as_ptr()),
+                    PCWSTR(val.as_ptr()),
+                    RRF_RT_REG_SZ,
+                    None,
+                    Some(buf.as_mut_ptr() as *mut _),
+                    Some(&mut size),
+                )
+                .is_ok()
+            };
+            let dir = if ok {
+                let end = buf.iter().position(|c| *c == 0).unwrap_or(0);
+                PathBuf::from(String::from_utf16_lossy(&buf[..end]))
+            } else {
+                PathBuf::from(r"C:\VirtualDisplayDriver")
+            };
+            dir.join("vdd_settings.xml")
+        }
+
+        /// Ajoute la résolution du téléphone à la liste des modes et fixe le nombre d'écrans.
+        pub fn configure(w: u32, h: u32, hz: u32, count: u32) -> Result<(), String> {
+            let path = settings_path();
+            let mut xml = std::fs::read_to_string(&path)
+                .map_err(|e| format!("réglages du pilote illisibles ({}) : {e}", path.display()))?;
+            xml = super::super::set_xml_count(&xml, count);
+            xml = super::super::ensure_xml_resolution(&xml, w, h, hz);
+            std::fs::write(&path, xml).map_err(|e| {
+                format!(
+                    "réglages du pilote non modifiables ({}) : {e}",
+                    path.display()
+                )
+            })
+        }
+    }
+
+    /// Capture d'un écran par l'API Desktop Duplication (DXGI).
+    struct Duplicator {
+        dup: windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication,
+        device: windows::Win32::Graphics::Direct3D11::ID3D11Device,
+        ctx: windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
+        staging: Option<(
+            windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
+            u32,
+            u32,
+        )>,
+        has_frame: bool,
+    }
+
+    unsafe impl Send for Duplicator {}
+
+    impl Duplicator {
+        fn open(device_name: &[u16; 32]) -> Option<Self> {
+            use windows::core::Interface;
+            use windows::Win32::Foundation::HMODULE;
+            use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
+            use windows::Win32::Graphics::Direct3D11::{
+                D3D11CreateDevice, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
+            };
+            use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIOutput1};
+            unsafe {
+                let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+                let mut ai = 0;
+                while let Ok(adapter) = factory.EnumAdapters1(ai) {
+                    let mut oi = 0;
+                    while let Ok(output) = adapter.EnumOutputs(oi) {
+                        if output
+                            .GetDesc()
+                            .map(|d| &d.DeviceName == device_name)
+                            .unwrap_or(false)
+                        {
+                            let mut device = None;
+                            let mut ctx = None;
+                            D3D11CreateDevice(
+                                &adapter,
+                                D3D_DRIVER_TYPE_UNKNOWN,
+                                HMODULE::default(),
+                                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                                None,
+                                D3D11_SDK_VERSION,
+                                Some(&mut device),
+                                None,
+                                Some(&mut ctx),
+                            )
+                            .ok()?;
+                            let (device, ctx) = (device?, ctx?);
+                            let out1: IDXGIOutput1 = output.cast().ok()?;
+                            let dup = out1.DuplicateOutput(&device).ok()?;
+                            return Some(Self {
+                                dup,
+                                device,
+                                ctx,
+                                staging: None,
+                                has_frame: false,
+                            });
+                        }
+                        oi += 1;
+                    }
+                    ai += 1;
+                }
+                None
+            }
+        }
+
+        /// `None` : pas de nouvelle image (ou accès perdu : l'appelant rouvre la capture).
+        fn next(
+            &mut self,
+            buf: &mut Vec<u8>,
+            timeout: Duration,
+            force: bool,
+        ) -> Result<Option<(u32, u32)>, ()> {
+            use windows::core::Interface;
+            use windows::Win32::Graphics::Direct3D11::{
+                ID3D11Texture2D, D3D11_CPU_ACCESS_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ,
+                D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+            };
+            use windows::Win32::Graphics::Dxgi::{
+                DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+            };
+            unsafe {
+                let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
+                let mut res = None;
+                match self
+                    .dup
+                    .AcquireNextFrame(timeout.as_millis() as u32, &mut info, &mut res)
+                {
+                    Ok(()) => {}
+                    Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
+                        if !(force && self.has_frame) {
+                            return Ok(None);
+                        }
+                        // Pas de changement : on renvoie la dernière image copiée.
+                        return Ok(self
+                            .staging
+                            .as_ref()
+                            .map(|s| (s.1, s.2))
+                            .filter(|_| !buf.is_empty()));
+                    }
+                    Err(_) => return Err(()),
+                }
+                let changed =
+                    info.LastPresentTime != 0 || info.AccumulatedFrames > 0 || !self.has_frame;
+                let result = (|| -> Option<(u32, u32)> {
+                    if !changed && !force {
+                        return None;
+                    }
+                    let tex: ID3D11Texture2D = res.as_ref()?.cast().ok()?;
+                    let mut desc = D3D11_TEXTURE2D_DESC::default();
+                    tex.GetDesc(&mut desc);
+                    if self
+                        .staging
+                        .as_ref()
+                        .map(|s| (s.1, s.2) != (desc.Width, desc.Height))
+                        .unwrap_or(true)
+                    {
+                        let mut sd = desc;
+                        sd.Usage = D3D11_USAGE_STAGING;
+                        sd.BindFlags = 0;
+                        sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+                        sd.MiscFlags = 0;
+                        sd.MipLevels = 1;
+                        sd.ArraySize = 1;
+                        let mut st = None;
+                        self.device.CreateTexture2D(&sd, None, Some(&mut st)).ok()?;
+                        self.staging = Some((st?, desc.Width, desc.Height));
+                    }
+                    let (st, w, h) = self.staging.clone()?;
+                    self.ctx.CopyResource(&st, &tex);
+                    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+                    self.ctx
+                        .Map(&st, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                        .ok()?;
+                    let (wu, hu, pitch) = (w as usize, h as usize, mapped.RowPitch as usize);
+                    buf.resize(wu * hu * 4, 0);
+                    let src = mapped.pData as *const u8;
+                    for y in 0..hu {
+                        std::ptr::copy_nonoverlapping(
+                            src.add(y * pitch),
+                            buf.as_mut_ptr().add(y * wu * 4),
+                            wu * 4,
+                        );
+                    }
+                    self.ctx.Unmap(&st, 0);
+                    self.has_frame = true;
+                    Some((w, h))
+                })();
+                let _ = self.dup.ReleaseFrame();
+                Ok(result)
+            }
+        }
+    }
+
+    enum Source {
+        Shared(FrameReader),
+        Dup(Duplicator, [u16; 32]),
+    }
+
+    impl Source {
+        fn next(
+            &mut self,
+            buf: &mut Vec<u8>,
+            timeout: Duration,
+            force: bool,
+        ) -> Option<(u32, u32)> {
+            match self {
+                Source::Shared(r) => r.next(buf, timeout, force),
+                Source::Dup(d, name) => match d.next(buf, timeout, force) {
+                    Ok(v) => v,
+                    Err(()) => {
+                        // Accès perdu (changement de mode, verrouillage) : on rouvre la capture.
+                        std::thread::sleep(Duration::from_millis(200));
+                        if let Some(n) = Duplicator::open(name) {
+                            *d = n;
+                        }
+                        None
+                    }
+                },
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Backend {
+        Own,
+        Vdd,
+    }
+
     struct Active {
         peer: String,
         stop: Arc<AtomicBool>,
         width: u32,
         height: u32,
+        backend: Backend,
     }
 
     pub struct Display {
@@ -440,6 +748,74 @@ mod win {
                 fps: Arc::new(AtomicU32::new(30)),
                 rect: Mutex::new(None),
             }
+        }
+    }
+
+    /// Règle la définition et la fréquence d'un écran (sans droits administrateur).
+    fn set_mode(name: &[u16; 32], w: u32, h: u32, hz: u32) {
+        use windows::Win32::Graphics::Gdi::{
+            ChangeDisplaySettingsExW, CDS_UPDATEREGISTRY, DEVMODEW, DM_DISPLAYFREQUENCY,
+            DM_PELSHEIGHT, DM_PELSWIDTH,
+        };
+        let dm = DEVMODEW {
+            dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+            dmPelsWidth: w,
+            dmPelsHeight: h,
+            dmDisplayFrequency: hz,
+            dmFields: DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY,
+            ..Default::default()
+        };
+        let r = unsafe {
+            ChangeDisplaySettingsExW(
+                PCWSTR(name.as_ptr()),
+                Some(&dm),
+                None,
+                CDS_UPDATEREGISTRY,
+                None,
+            )
+        };
+        tracing::info!("mode {w}×{h}@{hz} demandé pour l'écran virtuel : {r:?}");
+    }
+
+    /// Installe le pilote libre et signé « Virtual Display Driver » avec winget (Windows demande
+    /// l'autorisation). Aucune signature de test n'est nécessaire.
+    fn install_vdd() -> Result<String, String> {
+        let mut cmd = std::process::Command::new("winget");
+        cmd.args([
+            "install",
+            "--id",
+            "VirtualDrivers.Virtual-Display-Driver",
+            "-e",
+            "--silent",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            "--disable-interactivity",
+        ]);
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        let out = cmd.output().map_err(|_| "winget est introuvable : installez « Programme d'installation d'application » depuis le Microsoft Store, ou installez Virtual Display Driver depuis github.com/VirtualDrivers/Virtual-Display-Driver.".to_string())?;
+        // Le pilote crée son tube quelques secondes après l'installation.
+        for _ in 0..20 {
+            if vdd::present() {
+                // Aucun écran tant que NOTHING CONNECT ne le demande.
+                let _ = vdd::command("SETDISPLAYCOUNT 0");
+                return Ok("ok".into());
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        if out.status.success() {
+            Ok("redemarrage".into())
+        } else {
+            Err(format!(
+                "winget n'a pas pu installer le pilote : {}",
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .last()
+                    .unwrap_or("")
+                    .trim()
+            ))
         }
     }
 
@@ -479,20 +855,33 @@ mod win {
                 .map(|o| String::from_utf8_lossy(&o.stdout).contains("\"testsigning\":true"))
                 .unwrap_or(false);
             let a = self.active.lock().unwrap();
+            let own = interface_path().is_some();
+            let vdd_installed = vdd::present();
             DisplayStatus {
                 supported: true,
-                installed: interface_path().is_some(),
+                installed: own || vdd_installed,
                 testsigning,
                 active_peer: a.as_ref().map(|a| a.peer.clone()),
                 width: a.as_ref().map(|a| a.width).unwrap_or(0),
                 height: a.as_ref().map(|a| a.height).unwrap_or(0),
                 setup_available: exe.is_some(),
+                vdd_installed,
+                backend: if own {
+                    Some("nothing-connect".into())
+                } else if vdd_installed {
+                    Some("vdd".into())
+                } else {
+                    None
+                },
             }
         }
 
         /// Lance l'outil d'installation (`install`, `uninstall`, `enable-testsigning`).
         /// L'outil demande lui-même l'élévation (fenêtre UAC de Windows).
         pub fn setup(&self, app: &AppHandle, arg: &str) -> Result<String, String> {
+            if arg == "install-vdd" {
+                return install_vdd();
+            }
             let exe =
                 setup_exe(app).ok_or("Outil d'installation du pilote absent de cette version.")?;
             let dir = exe.parent().unwrap().to_string_lossy().into_owned();
@@ -536,11 +925,21 @@ mod win {
                 .min(1.0);
             w = ((w as f32 * k) as u32).max(320) & !1;
             h = ((h as f32 * k) as u32).max(320) & !1;
-            let mut req = Vec::with_capacity(12);
-            req.extend_from_slice(&w.to_le_bytes());
-            req.extend_from_slice(&h.to_le_bytes());
-            req.extend_from_slice(&hz.clamp(30, 120).to_le_bytes());
-            send_ioctl(IOCTL_ADD, &req)?;
+            let hz = hz.clamp(30, 120);
+            match backend {
+                Backend::Own => {
+                    let mut req = Vec::with_capacity(12);
+                    req.extend_from_slice(&w.to_le_bytes());
+                    req.extend_from_slice(&h.to_le_bytes());
+                    req.extend_from_slice(&hz.to_le_bytes());
+                    send_ioctl(IOCTL_ADD, &req)?;
+                }
+                Backend::Vdd => {
+                    vdd::configure(w, h, hz, 1)?;
+                    // Recharge le pilote avec un écran ; Windows l'ajoute en mode « Étendre ».
+                    vdd::command("SETDISPLAYCOUNT 1")?;
+                }
+            }
             app.state::<AppState>()
                 .node
                 .lock()
@@ -579,17 +978,29 @@ mod win {
             std::thread::Builder::new()
                 .name("nc-display".into())
                 .spawn(move || {
-                    // Le pilote crée la mémoire partagée quand Windows attribue la chaîne d'images.
-                    let mut reader = None;
+                    // Notre pilote crée la mémoire partagée quand Windows attribue la chaîne d'images ;
+                    // avec VDD, on attend que l'écran apparaisse puis on règle sa définition.
+                    let mut reader: Option<Source> = None;
                     let started = Instant::now();
+                    let mut mode_set = false;
                     while reader.is_none() && !stop.load(Ordering::SeqCst) {
-                        reader = FrameReader::open();
+                        reader = match backend {
+                            Backend::Own => FrameReader::open().map(Source::Shared),
+                            Backend::Vdd => display_device_name(vdd::ADAPTER).and_then(|name| {
+                                if !mode_set {
+                                    set_mode(&name, w, h, hz);
+                                    mode_set = true;
+                                    std::thread::sleep(Duration::from_millis(500));
+                                }
+                                Duplicator::open(&name).map(|d| Source::Dup(d, name))
+                            }),
+                        };
                         if reader.is_none() {
-                            if started.elapsed() > Duration::from_secs(15) {
+                            if started.elapsed() > Duration::from_secs(20) {
                                 tracing::warn!("écran étendu : aucune image du pilote");
                                 return;
                             }
-                            std::thread::sleep(Duration::from_millis(200));
+                            std::thread::sleep(Duration::from_millis(250));
                         }
                     }
                     let Some(mut reader) = reader else { return };
@@ -645,7 +1056,14 @@ mod win {
         /// Débranche le moniteur virtuel (Windows replace les fenêtres sur l'écran principal).
         pub fn stop(&self, app: &AppHandle) {
             if let Some(a) = self.stop_thread() {
-                let _ = send_ioctl(IOCTL_REMOVE, &[]);
+                match a.backend {
+                    Backend::Own => {
+                        let _ = send_ioctl(IOCTL_REMOVE, &[]);
+                    }
+                    Backend::Vdd => {
+                        let _ = vdd::command("SETDISPLAYCOUNT 0");
+                    }
+                }
                 let st = app.state::<AppState>();
                 let node = st.node.lock().unwrap();
                 node.set_streaming(false);
@@ -678,10 +1096,15 @@ mod win {
 
         /// Toucher du téléphone → souris Windows sur le moniteur virtuel.
         pub fn pointer(&self, action: PointerAction, x: f32, y: f32) {
+            let adapter = match self.active.lock().unwrap().as_ref().map(|a| a.backend) {
+                Some(Backend::Own) => ADAPTER_NAME,
+                Some(Backend::Vdd) => vdd::ADAPTER,
+                None => return,
+            };
             let rect = {
                 let mut r = self.rect.lock().unwrap();
                 if r.is_none() {
-                    *r = monitor_rect();
+                    *r = monitor_rect(adapter);
                 }
                 *r
             };
@@ -726,6 +1149,19 @@ mod tests {
         encode_jpeg(&bgra, w, h, 70, &mut out).unwrap();
         assert_eq!(&out[..2], &[0xFF, 0xD8], "en-tête JPEG");
         assert!(out.len() < bgra.len());
+    }
+
+    #[test]
+    fn vdd_settings_edit() {
+        let xml = "<vdd_settings>\n    <monitors>\n        <count>1</count>\n    </monitors>\n    <resolutions>\n        <resolution>\n            <width>1920</width>\n            <height>1080</height>\n            <refresh_rate>60</refresh_rate>\n        </resolution>\n    </resolutions>\n</vdd_settings>";
+        let x = set_xml_count(xml, 0);
+        assert!(x.contains("<count>0</count>"));
+        let x = ensure_xml_resolution(&x, 2400, 1080, 60);
+        assert!(x.contains("<width>2400</width>"));
+        assert_eq!(x.matches("<resolution>").count(), 2);
+        // Idempotent : pas de doublon.
+        assert_eq!(ensure_xml_resolution(&x, 2400, 1080, 60), x);
+        assert_eq!(ensure_xml_resolution(&x, 1920, 1080, 60), x);
     }
 
     #[test]

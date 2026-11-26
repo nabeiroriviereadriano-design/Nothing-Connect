@@ -121,20 +121,26 @@ static void WINAPI OnCreated(HSWDEVICE, HRESULT hr, PVOID ctx, PCWSTR)
     SetEvent(p->first);
 }
 
+static bool IsTrustError(DWORD e)
+{
+    // Erreurs de signature / confiance renvoyées par l'installation PnP.
+    return e == ERROR_INVALID_IMAGE_HASH || e == 0xE0000242 /* ERROR_AUTHENTICODE_PUBLISHER_NOT_TRUSTED */ ||
+           e == 0xE0000244 /* ERROR_AUTHENTICODE_TRUST_NOT_ESTABLISHED */ || e == 0x800B0109 /* CERT_E_UNTRUSTEDROOT */ ||
+           e == 0x800B0100 /* TRUST_E_NOSIGNATURE */ || e == 0xE000024B /* ERROR_DRIVER_STORE_ADD_FAILED */;
+}
+
 static int Install(const std::wstring& dir)
 {
-    if (!TestSigningEnabled())
-    {
-        fwprintf(stderr, L"La signature de test est désactivée.\n");
-        return 10;
-    }
+    // Pilote en mode utilisateur (UMDF) : un certificat approuvé localement suffit en général.
+    // Si Windows exige malgré tout une signature Microsoft, on le signale (code 10).
     AddCertificate(dir + L"\\NcDisplay.cer");
     std::wstring inf = dir + L"\\NcDisplay.inf";
     BOOL reboot = FALSE;
     if (!DiInstallDriverW(nullptr, inf.c_str(), 0, &reboot))
     {
-        fwprintf(stderr, L"Installation du pilote refusée (0x%08lx).\n", GetLastError());
-        return 1;
+        DWORD e = GetLastError();
+        fwprintf(stderr, L"Installation du pilote refusée (0x%08lx).\n", e);
+        return (IsTrustError(e) && !TestSigningEnabled()) ? 10 : 1;
     }
     if (!InterfacePresent())
     {

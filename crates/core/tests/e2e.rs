@@ -667,3 +667,34 @@ fn clipboard_is_delivered() {
     });
     assert_eq!(got, "copié sur le PC");
 }
+
+#[test]
+fn capabilities_update_during_session() {
+    use nc_core::protocol::Capability;
+    let pc = peer(Role::Pc);
+    let phone = peer(Role::Phone);
+    let (phone_id, pc_id) = pair(&pc, &phone);
+    phone
+        .node
+        .send(
+            &pc_id,
+            Message::Capabilities {
+                capabilities: vec![Capability::ScreenMirror, Capability::MirrorControl],
+            },
+        )
+        .unwrap();
+    pc.ev.wait(T, |e| {
+        matches!(e, Event::DeviceUpdated { .. }).then_some(())
+    });
+    let d = pc
+        .node
+        .devices()
+        .unwrap()
+        .into_iter()
+        .find(|d| d.id == phone_id)
+        .unwrap();
+    assert_eq!(
+        d.capabilities,
+        vec![Capability::ScreenMirror, Capability::MirrorControl]
+    );
+}

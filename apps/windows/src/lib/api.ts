@@ -143,6 +143,7 @@ export type CoreEvent =
   | { type: "media_sessions"; peer_id: string; sessions: MediaSession[] }
   | { type: "share"; peer_id: string; kind: "text" | "link"; content: string }
   | { type: "clipboard"; peer_id: string; content: string }
+  | { type: "device_updated"; device: DeviceRecord }
   | { type: "command_result"; peer_id: string; id: number; ok: boolean; error: string | null }
   | { type: "request"; peer_id: string; message: StreamMessage | { t: string } }
   | { type: "transfer_incoming"; id: string; peer_id: string; files: { rel_path: string; size: number }[]; total_bytes: number }
@@ -200,7 +201,7 @@ export const api = {
   usbStatus: () => invoke<UsbStatus | null>("usb_status"),
   androidInstall: (serial: string | null) => invoke<string>("android_install", { serial }),
   displayStatus: () => invoke<DisplayStatus>("display_status"),
-  displaySetup: (action: "install" | "uninstall" | "enable-testsigning") => invoke<string>("display_setup", { action }),
+  displaySetup: (action: "install" | "uninstall" | "enable-testsigning" | "install-vdd") => invoke<string>("display_setup", { action }),
   displayStart: (peerId: string, scale: number, quality: number, fps: number, portrait: boolean) =>
     invoke<void>("display_start", { peerId, scale, quality, fps, portrait }),
   displayStop: () => invoke<void>("display_stop"),
@@ -209,4 +210,5 @@ export const api = {
 export interface DisplayStatus {
   supported: boolean; installed: boolean; testsigning: boolean; active_peer: string | null;
   width: number; height: number; setup_available: boolean;
+  vdd_installed: boolean; backend: "nothing-connect" | "vdd" | null;
 }

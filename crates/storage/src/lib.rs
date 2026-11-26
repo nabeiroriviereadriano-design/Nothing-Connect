@@ -275,6 +275,14 @@ impl Store {
         Ok(())
     }
 
+    pub fn set_capabilities(&self, id: &str, caps: &[nc_protocol::Capability]) -> Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE devices SET capabilities = ?2 WHERE id = ?1",
+            params![id, serde_json::to_string(caps)?],
+        )?;
+        Ok(())
+    }
+
     pub fn set_auto_accept(&self, id: &str, on: bool) -> Result<()> {
         self.conn.lock().unwrap().execute(
             "UPDATE devices SET auto_accept = ?2 WHERE id = ?1",

@@ -124,6 +124,10 @@ pub enum Event {
         peer_id: String,
         content: String,
     },
+    /// Informations d'un appareil modifiées (capacités…).
+    DeviceUpdated {
+        device: DeviceRecord,
+    },
     CommandResult {
         peer_id: String,
         id: u64,

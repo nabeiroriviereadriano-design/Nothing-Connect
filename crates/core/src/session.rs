@@ -563,6 +563,17 @@ fn dispatch(inner: &Arc<Inner>, s: &Arc<Session>, m: Message) -> Option<String> 
         Message::TransferAccept { id, offsets } => transfers::on_accept(inner, &peer, id, offsets),
         Message::TransferReject { id, .. } => transfers::on_reject(inner, id),
         Message::TransferFileEnd { .. } => {}
+        Message::Capabilities { capabilities } => {
+            let caps: Vec<_> = capabilities
+                .into_iter()
+                .filter(|c| *c != nc_protocol::Capability::Unknown)
+                .collect();
+            if inner.store.set_capabilities(&peer, &caps).is_ok() {
+                if let Ok(Some(device)) = inner.store.device(&peer) {
+                    inner.emit(Event::DeviceUpdated { device });
+                }
+            }
+        }
         Message::Clipboard { content } => {
             if content.len() <= 1 << 20 {
                 inner.emit(Event::Clipboard {

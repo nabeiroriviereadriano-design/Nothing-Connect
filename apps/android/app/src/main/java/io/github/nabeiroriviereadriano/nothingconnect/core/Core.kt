@@ -18,6 +18,7 @@ import uniffi.nc_ffi.EventListener
 import uniffi.nc_ffi.NamedInput
 import uniffi.nc_ffi.NcException
 import uniffi.nc_ffi.NcNode
+import uniffi.nc_ffi.StreamListener
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -49,7 +50,7 @@ sealed interface PairingUi {
  * natifs : ils sont recopiés immédiatement dans une file Kotlin traitée en série.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-object Core : EventListener {
+object Core : EventListener, StreamListener {
     lateinit var app: Context
         private set
     lateinit var node: NcNode
@@ -75,12 +76,29 @@ object Core : EventListener {
 
     val receivedDir: File get() = File(app.getExternalFilesDir(null) ?: app.filesDir, "received")
 
-    fun capabilities(): JSONArray = JSONArray(
-        listOf(
+    /** Capacités réellement disponibles maintenant (le contrôle dépend du service d'accessibilité). */
+    fun capabilities(): JSONArray {
+        val caps = mutableListOf(
             "file_transfer", "share_text", "device_status", "notifications", "notification_actions",
             "media_control", "ring", "vibrate", "media_volume", "do_not_disturb",
+            "clipboard", "screen_mirror", "phone_audio", "audio_playback", "extended_display",
         )
-    )
+        if (io.github.nabeiroriviereadriano.nothingconnect.stream.ControlService.instance != null) caps += "mirror_control"
+        return JSONArray(caps)
+    }
+
+    /** Annonce aux PC connectés un changement de capacités (ex. contrôle activé). */
+    fun announceCapabilities() {
+        broadcast(JSONObject().put("t", "capabilities").put("capabilities", capabilities()))
+    }
+
+    /** Unités de flux reçues du PC (son du PC, écran étendu). Appelé sur le fil réseau. */
+    private val streamHandlers = CopyOnWriteArrayList<(String, Int, Int, Long, ByteArray) -> Unit>()
+    fun onStreamPacket(h: (String, Int, Int, Long, ByteArray) -> Unit) { streamHandlers += h }
+
+    override fun onStream(peerId: String, kind: UByte, flags: UByte, tsUs: ULong, data: ByteArray) {
+        streamHandlers.forEach { runCatching { it(peerId, kind.toInt(), flags.toInt(), tsUs.toLong(), data) } }
+    }
 
     fun deviceName(ctx: Context): String =
         Settings.Global.getString(ctx.contentResolver, Settings.Global.DEVICE_NAME)?.takeIf { it.isNotBlank() } ?: Build.MODEL
@@ -102,6 +120,7 @@ object Core : EventListener {
             receivedDir.absolutePath,
             device.toString(),
             KeystoreVault(app),
+            this,
             this,
         )
         refreshDevices()

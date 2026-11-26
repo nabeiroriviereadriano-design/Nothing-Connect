@@ -16,9 +16,16 @@
   async function refresh() {
     st = await api.displayStatus();
   }
-  async function setup(action: "install" | "uninstall" | "enable-testsigning") {
+  let ownFailed = $state(false);
+  async function setup(action: "install" | "uninstall" | "enable-testsigning" | "install-vdd") {
     busy = true;
-    const r = await app.run(api.displaySetup(action));
+    let r: string | undefined;
+    try {
+      r = await api.displaySetup(action);
+    } catch (e) {
+      if (action === "install") ownFailed = true;
+      app.toast(String(e), "error");
+    }
     busy = false;
     if (r === "redemarrage") needReboot = true;
     else if (r !== undefined) app.toast(action === "uninstall" ? "Pilote retiré" : "Pilote installé");
@@ -63,22 +70,30 @@
   {:else}
     <section class="panel stack">
       <h2>Pilote d'écran</h2>
-      <div class="row"><span class={st.installed ? "live" : "idle"}></span><span>{st.installed ? "Installé" : "Non installé"}</span></div>
+      <div class="row"><span class={st.installed ? "live" : "idle"}></span>
+        <span>{st.backend === "nothing-connect" ? "Pilote NOTHING CONNECT installé" : st.backend === "vdd" ? "Pilote Virtual Display Driver installé" : "Aucun pilote d'écran"}</span></div>
       {#if !st.installed}
-        {#if !st.setup_available}
-          <p class="muted">Cette version ne contient pas le pilote.</p>
-        {:else if !st.testsigning}
-          <p class="muted">Le pilote n'est pas encore signé par Microsoft (cette signature exige un certificat professionnel payant). Pour l'utiliser dès maintenant, Windows doit accepter les pilotes signés « en test ».</p>
-          <div class="row wrap">
-            <button disabled={busy} onclick={enableTestSigning}>Activer la signature de test</button>
+        <div class="choice">
+          <h3>Virtual Display Driver (recommandé)</h3>
+          <p class="muted small">Pilote d'écran virtuel libre (licence MIT) et déjà signé : il s'installe sans mode test ni réglage du BIOS. Téléchargé depuis son dépôt officiel par winget ; Windows demande une autorisation.</p>
+          <div><button class="primary" disabled={busy} onclick={() => setup("install-vdd")}>{busy ? "Installation…" : "Installer Virtual Display Driver"}</button></div>
+        </div>
+        {#if st.setup_available}
+          <div class="choice">
+            <h3>Pilote NOTHING CONNECT</h3>
+            <p class="muted small">Pilote intégré à l'application. Windows peut refuser de le charger tant qu'il n'est pas signé par Microsoft.</p>
+            <div><button disabled={busy} onclick={() => setup("install")}>Installer le pilote intégré</button></div>
+            {#if ownFailed && !st.testsigning}
+              <p class="muted small">Windows exige une signature Microsoft pour ce pilote. Utilisez Virtual Display Driver ci-dessus, ou activez le mode signature de test (redémarrage, Secure Boot désactivé).</p>
+              <div><button class="ghost" disabled={busy} onclick={enableTestSigning}>Activer la signature de test</button></div>
+            {/if}
           </div>
-        {:else}
-          <p class="muted">Windows demandera une autorisation administrateur.</p>
-          <div><button class="primary" disabled={busy} onclick={() => setup("install")}>Installer le pilote</button></div>
         {/if}
-        {#if needReboot}<p class="warn">Redémarrez le PC, puis revenez ici pour installer le pilote.</p>{/if}
-      {:else}
+        {#if needReboot}<p class="warn">Redémarrez le PC pour terminer l'installation.</p>{/if}
+      {:else if st.backend === "nothing-connect"}
         <div><button class="ghost small" disabled={busy || !!st.active_peer} onclick={() => setup("uninstall")}>Retirer le pilote</button></div>
+      {:else}
+        <p class="muted small">Pour retirer Virtual Display Driver : Paramètres Windows › Applications.</p>
       {/if}
     </section>
 
@@ -128,4 +143,5 @@
   .wrap { flex-wrap: wrap; }
   select { width: auto; }
   .warn { color: var(--red); }
+  .choice { border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 </style>

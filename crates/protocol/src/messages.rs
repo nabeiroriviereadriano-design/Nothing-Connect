@@ -412,6 +412,11 @@ pub enum Message {
         id: Uuid,
     },
 
+    /// Mise à jour des capacités en cours de session (ex. contrôle à distance activé).
+    Capabilities {
+        capabilities: Vec<Capability>,
+    },
+
     // --- presse-papiers ---
     Clipboard {
         content: String,

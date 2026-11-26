@@ -188,6 +188,11 @@ class AppStore {
         break;
       case "clipboard":
         break;
+      case "device_updated": {
+        const i = this.devices.findIndex((d) => d.id === e.device.id);
+        if (i >= 0) this.devices[i] = e.device;
+        break;
+      }
       case "request": {
         const m = e.message as { t: string; kind?: StreamKind; params?: StreamParams; reason?: string | null };
         if (m.t === "stream_start" && m.kind) {
