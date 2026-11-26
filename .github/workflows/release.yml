@@ -1,10 +1,12 @@
 name: Publication
 
-# Publier une version :  git tag v0.1.0 && git push origin v0.1.0
-# Le numéro du tag doit correspondre à apps/windows/package.json (scripts/set-version.py).
+# Publier une version : fixer le numéro (scripts/set-version.py X.Y.Z), le pousser sur main,
+# puis pousser main sur la branche « release » (git push origin main:release) ou lancer ce
+# workflow depuis l'onglet Actions. Le tag vX.Y.Z et la Release sont créés automatiquement.
 on:
   push:
-    tags: ["v*"]
+    branches: [release]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -17,14 +19,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
           PKG=$(node -p "require('./apps/windows/package.json').version")
           CARGO=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          if [ "$TAG" != "$PKG" ] || [ "$TAG" != "$CARGO" ]; then
-            echo "::error::Tag $TAG, package.json $PKG, Cargo.toml $CARGO : versions différentes"; exit 1
+          if [ "$PKG" != "$CARGO" ]; then
+            echo "::error::package.json $PKG et Cargo.toml $CARGO différents (scripts/set-version.py)"; exit 1
           fi
-          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          if gh release view "v$PKG" >/dev/null 2>&1; then
+            echo "::error::La version $PKG est déjà publiée : augmentez le numéro avec scripts/set-version.py"; exit 1
+          fi
+          echo "version=$PKG" >> "$GITHUB_OUTPUT"
 
   windows:
     needs: check-version
@@ -93,4 +99,4 @@ jobs:
           cd out && sha256sum *.apk > SHA256SUMS.txt && cat SHA256SUMS.txt
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${GITHUB_REF_NAME}" out/* --clobber
+        run: gh release upload "v${{ needs.check-version.outputs.version }}" out/* --clobber

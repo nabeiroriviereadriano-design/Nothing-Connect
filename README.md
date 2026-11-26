@@ -43,7 +43,7 @@ cd apps/windows && npm ci && npx tauri dev   # application Windows
 cargo run -p nc-core --example fake_phone -- 127.0.0.1:47820 123456   # téléphone simulé
 ```
 
-Publier une version : `python3 scripts/set-version.py 0.2.0`, commit, puis `git tag v0.2.0 && git push origin v0.2.0`.
+Publier une version : `python3 scripts/set-version.py 0.2.0`, commit sur `main`, puis `git push origin main:release` (ou bouton « Run workflow » de Publication dans l'onglet Actions).
 La CI construit, signe et publie l'installeur Windows, l'APK et le fichier de mise à jour.
 
 Licence : MIT.
