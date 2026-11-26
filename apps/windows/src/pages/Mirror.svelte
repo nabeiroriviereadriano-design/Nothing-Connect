@@ -243,5 +243,4 @@
   .screen.hidden { display: none; }
   canvas { max-height: 70vh; max-width: 100%; border-radius: 18px; background: #000; touch-action: none; cursor: pointer; }
   canvas:fullscreen { max-height: none; border-radius: 0; object-fit: contain; }
-  select { width: auto; }
 </style>

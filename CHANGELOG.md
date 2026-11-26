@@ -1,5 +1,15 @@
 # Notes de version
 
+## 0.3.0
+
+- **Écran étendu beaucoup plus rapide** : vidéo H.264 au lieu d'images JPEG. Seules les différences entre images sont envoyées (débit divisé par 10 à 100 sur un bureau) et le téléphone décode avec son circuit vidéo matériel. Mesuré sur un bureau en 2400×1080 : 274 Ko par image en JPEG contre quelques Ko en H.264.
+- **Fréquence maximale du téléphone** : l'écran virtuel prend la fréquence de l'écran du téléphone (90, 120 Hz…) et le téléphone passe en mode rapide ; choix « Max » dans les images par seconde.
+- **Réglages enregistrés automatiquement** (écran étendu et miroir), conservés après les mises à jour ; qualité et images/s modifiables pendant une session.
+- **Mesures en direct** : images/s, fréquence, débit, définition.
+- **Nouvelle interface** : l'écran étendu se pilote depuis l'accueil (l'onglet séparé disparaît), barre latérale avec pictogrammes en points, état du téléphone (USB/Wi-Fi, batterie) toujours visible, sélecteurs rapides à la place des listes déroulantes.
+- **Nouvelle icône** : monogramme NC en matrice de points.
+- Compatibilité : un PC ou un téléphone resté en 0.2 continue de fonctionner (images JPEG).
+
 ## 0.2.1
 
 - Écran étendu : le moniteur virtuel prend exactement le format de l'écran du téléphone (l'image remplit tout l'écran) et le toucher tombe au bon endroit, même s'il reste des bandes noires.

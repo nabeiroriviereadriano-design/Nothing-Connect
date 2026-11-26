@@ -4,7 +4,7 @@ Légende : **Testé** = tests automatisés reproductibles qui passent en CI ; **
 écrit et compilé, validation sur appareils réels à faire ; **Non commencé** = rien n'est
 annoncé dans l'interface.
 
-Dernière mise à jour : version 0.2.0. Les fonctions temps réel (miroir, son, écran étendu)
+Dernière mise à jour : version 0.3.0. Les fonctions temps réel (miroir, son, écran étendu)
 compilent en CI mais n'ont pas encore été validées sur un PC et un téléphone réels : elles sont
 marquées « Implémenté » tant que ce n'est pas fait.
 
@@ -21,7 +21,7 @@ marquées « Implémenté » tant que ce n'est pas fait.
 | 6.4 | Historique | **Testé** (cœur) / Implémenté (UI) | « Afficher » ouvre l'Explorateur sur le fichier |
 | 7 | Partage rapide : glisser-déposer, zone de notification, « Envoyer vers », menu Partager Android, textes et liens | Implémenté | Raccourci clavier global : non commencé ; menu contextuel Explorateur : via « Envoyer vers » |
 | 8 | Miroir de l'écran + contrôle | Implémenté | H.264 matériel (MediaCodec) → WebCodecs ; accord Android à chaque diffusion ; contrôle (toucher, balayer, retour, texte) par service d'accessibilité activé par l'utilisateur ; images perdues → image clé demandée. Test de bout en bout du transport : `realtime_streams_are_reassembled_in_order`, `congested_stream_drops_units_instead_of_queueing` |
-| 9 | Écran secondaire étendu | Implémenté | Pilote IddCx intégré (UMDF, certificat local, sans mode test) ou Virtual Display Driver (signé, MIT) ; images JPEG, toucher → souris. Voir [pilote-ecran.md](pilote-ecran.md) |
+| 9 | Écran secondaire étendu | Implémenté | Pilote IddCx intégré (UMDF, certificat local, sans mode test) ou Virtual Display Driver (signé, MIT) ; vidéo H.264 (OpenH264, testé : `h264enc::tests`) décodée par MediaCodec, repli JPEG pour les versions 0.2 ; fréquence max du téléphone ; toucher → souris. Voir [pilote-ecran.md](pilote-ecran.md) |
 | 10 | Notifications : réception, popups, historique, filtre par appli (appliqué sur le téléphone), masquage du sensible | **Testé** (cœur) / Implémenté (Android, Windows) | `messages_commands_and_notifications` |
 | 10.2 | Réponse rapide, ouvrir, ignorer | Implémenté | Dépend de chaque application ; ouverture soumise aux règles Android 14+ |
 | 11 | Centre de contrôle : batterie, température, stockage, Wi-Fi, Bluetooth, réseau mobile, sonner, vibrer, volume, NPD | Implémenté | Commandes testées de bout en bout dans le cœur ; nom du Wi-Fi non affiché (exigerait la localisation) |
