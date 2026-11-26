@@ -15,7 +15,7 @@ dépend des permissions déclarées, pas d'un virus détecté.
 Une installation par câble USB (ADB) n'est pas concernée par ce blocage.
 
 1. Sur le téléphone : Paramètres › À propos du téléphone › touchez 7 fois « Numéro de build »
-   (Nothing : « Version de Nothing OS »), puis Paramètres › Système › Options pour les
+   (selon la marque, dans « Informations sur le logiciel »), puis Paramètres › Système › Options pour les
    développeurs › **Débogage USB**.
 2. Branchez le téléphone au PC et acceptez « Autoriser le débogage USB » sur le téléphone.
 3. Dans NOTHING CONNECT sur le PC : page **Appareils** › « Installer sur le téléphone ».

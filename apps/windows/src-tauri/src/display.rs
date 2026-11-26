@@ -366,10 +366,9 @@ mod win {
         }
     }
 
-    /// Rectangle (gauche, haut, largeur, hauteur) du moniteur virtuel sur le bureau.
-    fn monitor_rect() -> Option<(i32, i32, i32, i32)> {
+    /// Nom GDI (\\.\DISPLAYn) de l'écran virtuel actif, d'après le nom de son adaptateur.
+    fn display_device_name(adapter: &str) -> Option<[u16; 32]> {
         unsafe {
-            let mut device_name: Option<[u16; 32]> = None;
             let mut i = 0;
             loop {
                 let mut dd = DISPLAY_DEVICEW {
@@ -377,16 +376,22 @@ mod win {
                     ..Default::default()
                 };
                 if !EnumDisplayDevicesW(PCWSTR::null(), i, &mut dd, 0).as_bool() {
-                    break;
+                    return None;
                 }
                 let desc = String::from_utf16_lossy(&dd.DeviceString);
-                if desc.contains(ADAPTER_NAME) && dd.StateFlags & 0x1 != 0 {
-                    device_name = Some(dd.DeviceName);
-                    break;
+                // DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x1
+                if desc.contains(adapter) && dd.StateFlags.0 & 0x1 != 0 {
+                    return Some(dd.DeviceName);
                 }
                 i += 1;
             }
-            let name = device_name?;
+        }
+    }
+
+    /// Rectangle (gauche, haut, largeur, hauteur) du moniteur virtuel sur le bureau.
+    fn monitor_rect(adapter: &str) -> Option<(i32, i32, i32, i32)> {
+        unsafe {
+            let name = display_device_name(adapter)?;
             struct Ctx {
                 name: [u16; 32],
                 rect: Option<RECT>,
@@ -459,20 +464,37 @@ mod win {
         pub const ADAPTER: &str = "Virtual Display Driver";
         const PIPE: &str = r"\\.\pipe\MTTVirtualDisplayPipe";
 
-        pub fn present() -> bool {
+        /// ERROR_PIPE_BUSY : le tube existe mais sert déjà un autre client.
+        const PIPE_BUSY: i32 = 231;
+
+        fn open() -> std::io::Result<std::fs::File> {
             std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .open(PIPE)
-                .is_ok()
+        }
+
+        pub fn present() -> bool {
+            match open() {
+                Ok(_) => true,
+                Err(e) => e.raw_os_error() == Some(PIPE_BUSY),
+            }
         }
 
         pub fn command(cmd: &str) -> Result<(), String> {
-            let mut p = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(PIPE)
-                .map_err(|e| format!("pilote Virtual Display Driver injoignable : {e}"))?;
+            let mut tries = 0;
+            let mut p = loop {
+                match open() {
+                    Ok(f) => break f,
+                    Err(e) if e.raw_os_error() == Some(PIPE_BUSY) && tries < 20 => {
+                        tries += 1;
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    Err(e) => {
+                        return Err(format!("pilote Virtual Display Driver injoignable : {e}"))
+                    }
+                }
+            };
             let bytes: Vec<u8> = cmd
                 .encode_utf16()
                 .chain(std::iter::once(0))
@@ -751,6 +773,17 @@ mod win {
         }
     }
 
+    fn remove_monitor(b: Backend) {
+        match b {
+            Backend::Own => {
+                let _ = send_ioctl(IOCTL_REMOVE, &[]);
+            }
+            Backend::Vdd => {
+                let _ = vdd::command("SETDISPLAYCOUNT 0");
+            }
+        }
+    }
+
     /// Règle la définition et la fréquence d'un écran (sans droits administrateur).
     fn set_mode(name: &[u16; 32], w: u32, h: u32, hz: u32) {
         use windows::Win32::Graphics::Gdi::{
@@ -915,7 +948,20 @@ mod win {
             h: u32,
             hz: u32,
         ) -> Result<(), String> {
-            self.stop_thread();
+            let backend = if interface_path().is_some() {
+                Backend::Own
+            } else if vdd::present() {
+                Backend::Vdd
+            } else {
+                return Err("Aucun pilote d'écran installé sur ce PC (page Écran étendu).".into());
+            };
+            // Nouvelle annonce du téléphone (écran rouvert) : on relance la capture ; l'écran
+            // précédent n'est retiré que s'il venait de l'autre pilote.
+            if let Some(prev) = self.stop_thread() {
+                if prev.backend != backend {
+                    remove_monitor(prev.backend);
+                }
+            }
             let s = self.scale_pct.load(Ordering::SeqCst) as f32 / 100.0;
             let fit = |v: u32, max: u32| -> u32 { ((v as f32 * s) as u32).min(max) & !1 };
             let (mut w, mut h) = (fit(w, MAX_W as u32), fit(h, MAX_H as u32));
@@ -952,6 +998,7 @@ mod win {
                 stop: stop.clone(),
                 width: w,
                 height: h,
+                backend,
             });
             *self.rect.lock().unwrap() = None;
             let params = StreamParams {
@@ -1056,14 +1103,7 @@ mod win {
         /// Débranche le moniteur virtuel (Windows replace les fenêtres sur l'écran principal).
         pub fn stop(&self, app: &AppHandle) {
             if let Some(a) = self.stop_thread() {
-                match a.backend {
-                    Backend::Own => {
-                        let _ = send_ioctl(IOCTL_REMOVE, &[]);
-                    }
-                    Backend::Vdd => {
-                        let _ = vdd::command("SETDISPLAYCOUNT 0");
-                    }
-                }
+                remove_monitor(a.backend);
                 let st = app.state::<AppState>();
                 let node = st.node.lock().unwrap();
                 node.set_streaming(false);
