@@ -1,11 +1,14 @@
 # Compile le pilote d'écran et l'outil d'installation, crée le catalogue et le signe avec un
-# certificat de TEST (la signature Microsoft, nécessaire pour une installation sans mode test,
-# exige un certificat EV et le portail Partner Center : voir docs/pilote-ecran.md).
+# certificat propre à NOTHING CONNECT (clé détruite après usage). Le pilote fonctionnant en mode
+# utilisateur (UMDF), ce certificat approuvé localement suffit en général : pas de mode test.
 # Sortie : apps/windows/src-tauri/driver/ (embarqué dans l'installeur Windows).
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $out = Join-Path $root "..\..\..\apps\windows\src-tauri\driver"
-$msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
+# MSBuild 64 bits : la vérification INF du WDK récent n'existe plus qu'en 64 bits.
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\amd64\MSBuild.exe" | Select-Object -First 1
+if (-not $msbuild) { $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1 }
 
 & $msbuild "$root\NcDisplay\NcDisplay.vcxproj" /p:Configuration=Release /p:Platform=x64 /m /nologo /v:minimal
 if ($LASTEXITCODE -ne 0) { throw "compilation du pilote échouée" }
