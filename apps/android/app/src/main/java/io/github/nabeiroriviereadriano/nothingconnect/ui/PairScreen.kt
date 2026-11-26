@@ -149,10 +149,16 @@ fun PairScreen(onDone: () -> Unit, onCancel: (() -> Unit)?) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
             )
             if (code.isNotEmpty()) DotText(code.padEnd(6, '-').chunked(3).joinToString(" "), dot = 6.dp)
-            Primary("Associer", enabled = code.length == 6 && manualAddr.contains(':'), modifier = Modifier.fillMaxWidth()) {
+            if (manualAddr.isEmpty() && chosen == null) {
+                Text("Sans adresse, l'association passe par le câble USB (débogage USB activé).", color = Nc.Muted)
+            }
+            Primary("Associer", enabled = code.length == 6 && (manualAddr.isEmpty() || manualAddr.contains(':')), modifier = Modifier.fillMaxWidth()) {
                 Core.pairing.value = PairingUi.Waiting
                 Core.start()
-                Core.call { Core.node.pairWith(manualAddr, code, chosen?.fingerprint) }
+                // Toutes les adresses du PC trouvé (plusieurs cartes réseau), sinon l'adresse
+                // saisie ; le câble USB est essayé en dernier recours.
+                val addrs = chosen?.addrs?.takeIf { it.isNotEmpty() } ?: listOf(manualAddr).filter { it.isNotEmpty() }
+                Core.call { Core.node.pairWithAddrs(addrs, code, chosen?.fingerprint) }
                     ?: run { Core.pairing.value = PairingUi.Failed("Adresse ou code invalide") }
             }
         }

@@ -14,6 +14,16 @@
     IfFileExists "$INSTDIR\driver\NcDisplaySetup.exe" 0 +2
       ExecWait '"$INSTDIR\driver\NcDisplaySetup.exe" uninstall-if-present'
   ${EndIf}
+  ; Règle « NOTHING CONNECT » du pare-feu (si l'utilisateur l'a créée depuis l'application) :
+  ; retirée avec une fenêtre d'autorisation Windows. Ne s'exécute pas lors d'une mise à jour.
+  ${If} $UpdateMode <> 1
+    nsExec::ExecToStack 'netsh advfirewall firewall show rule name="NOTHING CONNECT"'
+    Pop $0
+    Pop $1
+    ${If} $0 == 0
+      ExecShellWait "runas" "netsh" 'advfirewall firewall delete rule name="NOTHING CONNECT"' SW_HIDE
+    ${EndIf}
+  ${EndIf}
   Delete "$APPDATA\Microsoft\Windows\SendTo\NOTHING CONNECT.lnk"
   ; Démarrage automatique éventuellement activé dans l'application.
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "NOTHING CONNECT"

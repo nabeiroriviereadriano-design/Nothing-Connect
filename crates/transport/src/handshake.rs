@@ -118,8 +118,19 @@ pub async fn connect_pairing(
     code: &str,
     expected_fingerprint: Option<&str>,
 ) -> Result<Established, TransportError> {
-    let code = nc_pairing::normalize_code(code)?;
     let stream = timeout(HANDSHAKE_TIMEOUT, TcpStream::connect(addr)).await??;
+    pairing_over(stream, identity, code, expected_fingerprint).await
+}
+
+/// Association sur une connexion TCP déjà ouverte (le téléphone essaie plusieurs adresses
+/// du PC et garde la première qui répond).
+pub async fn pairing_over(
+    stream: TcpStream,
+    identity: &Identity,
+    code: &str,
+    expected_fingerprint: Option<&str>,
+) -> Result<Established, TransportError> {
+    let code = nc_pairing::normalize_code(code)?;
     let est = timeout(HANDSHAKE_TIMEOUT, initiate_pairing(stream, identity, &code)).await??;
     if let Some(fp) = expected_fingerprint {
         if nc_security::fingerprint(&est.peer_key) != fp {

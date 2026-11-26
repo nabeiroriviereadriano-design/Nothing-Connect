@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/state.svelte";
-  import { api } from "../lib/api";
+  import { api, type FirewallStatus } from "../lib/api";
   import { bytes, ago } from "../lib/format";
   import { pickAndSend } from "../lib/send";
   import BatteryRing from "../components/BatteryRing.svelte";
@@ -10,6 +10,15 @@
   let d = $derived(app.device);
   let playing = $derived(app.selected ? (app.media[app.selected] ?? []).find((m) => m.state === "playing") ?? (app.media[app.selected] ?? [])[0] : undefined);
   let recent = $derived(app.past.filter((t) => t.device_id === app.selected).slice(0, 3));
+
+  // Téléphone hors ligne : le pare-feu Windows est une cause fréquente (réseau « Public »).
+  let fw = $state<FirewallStatus | null>(null);
+  $effect(() => {
+    if (d && !app.online && !fw) api.firewallStatus().then((s) => (fw = s)).catch(() => {});
+  });
+  async function allowFirewall() {
+    if ((await app.run(api.firewallAllow(), "NOTHING CONNECT est autorisé dans le pare-feu")) !== undefined) fw = await api.firewallStatus();
+  }
 
   function ring() {
     if (app.selected) app.run(api.command(app.selected, { c: "ring" }), "Le téléphone sonne");
@@ -44,6 +53,9 @@
         </div>
         {#if !app.online}
           <p class="muted small">Ouvrez l'application sur le téléphone : il se reconnecte seul dès qu'il est sur le même réseau ou branché en USB.</p>
+          {#if fw?.needs_fix}
+            <p class="small">Le pare-feu Windows bloque peut-être le téléphone sur ce réseau. <button class="link" onclick={allowFirewall}>Autoriser dans le pare-feu</button></p>
+          {/if}
         {/if}
       </div>
     </section>
@@ -118,5 +130,6 @@
   .app { color: var(--muted); width: 84px; flex: none; }
   b { font-weight: 500; }
   .tight { gap: 2px; }
+  .link { background: none; border: none; padding: 0; color: var(--white); text-decoration: underline; text-underline-offset: 3px; font-size: inherit; }
   @media (max-width: 980px) { .cols { grid-template-columns: 1fr; } }
 </style>

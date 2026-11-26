@@ -32,6 +32,57 @@ fn lan_ip() -> Option<String> {
     local_ip_address::local_ip().ok().map(|ip| ip.to_string())
 }
 
+/// Toutes les adresses IPv4 utilisables du PC : principale d'abord, cartes virtuelles
+/// (Hyper-V, VirtualBox, VMware, WSL) en dernier. Le téléphone les essaie toutes.
+fn lan_ips() -> Vec<String> {
+    let mut v: Vec<(u8, String)> = Vec::new();
+    let main = lan_ip();
+    if let Some(m) = &main {
+        v.push((0, m.clone()));
+    }
+    for (name, ip) in local_ip_address::list_afinet_netifas().unwrap_or_default() {
+        let std::net::IpAddr::V4(ip4) = ip else {
+            continue;
+        };
+        if ip4.is_loopback() || ip4.is_link_local() || ip4.is_unspecified() || ip4.is_multicast() {
+            continue;
+        }
+        let s = ip4.to_string();
+        if v.iter().any(|(_, x)| *x == s) {
+            continue;
+        }
+        let n = name.to_lowercase();
+        let virt = [
+            "vethernet",
+            "virtualbox",
+            "vmware",
+            "wsl",
+            "hyper-v",
+            "docker",
+            "loopback",
+        ]
+        .iter()
+        .any(|k| n.contains(k));
+        v.push((if virt { 2 } else { 1 }, s));
+    }
+    v.sort_by_key(|(rank, _)| *rank);
+    v.into_iter().map(|(_, s)| s).take(8).collect()
+}
+
+#[tauri::command]
+async fn firewall_status() -> crate::firewall::FirewallStatus {
+    tauri::async_runtime::spawn_blocking(crate::firewall::status)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn firewall_allow() -> R<()> {
+    tauri::async_runtime::spawn_blocking(crate::firewall::allow)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn app_info(s: State<AppState>) -> AppInfo {
     let node = s.node.lock().unwrap();
@@ -72,9 +123,9 @@ pub struct PairingView {
 
 #[tauri::command]
 fn open_pairing(s: State<AppState>) -> R<PairingView> {
-    let ip = lan_ip();
+    let ips = lan_ips();
     let node = s.node.lock().unwrap();
-    let info = node.open_pairing(ip.as_deref()).map_err(e)?;
+    let info = node.open_pairing(&ips).map_err(e)?;
     let qr_svg = info.qr_uri.as_deref().and_then(|uri| {
         qrcode::QrCode::new(uri.as_bytes()).ok().map(|q| {
             q.render::<qrcode::render::svg::Color>()
@@ -85,9 +136,12 @@ fn open_pairing(s: State<AppState>) -> R<PairingView> {
                 .build()
         })
     });
-    let address = ip
-        .zip(node.listen_addr())
-        .map(|(ip, a)| format!("{ip}:{}", a.port()));
+    let address = node.listen_addr().filter(|_| !ips.is_empty()).map(|a| {
+        ips.iter()
+            .map(|ip| format!("{ip}:{}", a.port()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    });
     Ok(PairingView {
         code: info.code,
         expires_in_s: info.expires_in_s,
@@ -642,6 +696,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         android_install,
         display_status,
         ui_prefs_get,
+        firewall_status,
+        firewall_allow,
         ui_prefs_set,
         display_setup,
         display_start,

@@ -242,7 +242,9 @@ impl Node {
 
     /// PC : ouvre une fenêtre d'association (code 6 chiffres, 120 s, 3 essais).
     /// `lan_host` sert au QR code (adresse IP du PC sur le réseau local).
-    pub fn open_pairing(&self, lan_host: Option<&str>) -> Result<PairingInfo> {
+    /// `lan_hosts` : adresses IPv4 du PC à mettre dans le QR code (la première est l'adresse
+    /// principale ; les autres servent quand le téléphone ne joint pas la première).
+    pub fn open_pairing(&self, lan_hosts: &[String]) -> Result<PairingInfo> {
         if self.inner.cfg.role != Role::Pc {
             return Err(CoreError::WrongRole("PC"));
         }
@@ -252,12 +254,13 @@ impl Node {
             .map(|a| a.port())
             .unwrap_or(self.inner.cfg.listen_port);
         let fp = self.fingerprint();
-        let qr_uri = lan_host.map(|h| {
+        let qr_uri = lan_hosts.first().map(|h| {
             QrPayload {
-                host: h.into(),
+                host: h.clone(),
                 port,
                 code: w.code().into(),
                 pc_fingerprint: fp.clone(),
+                extra_hosts: lan_hosts[1..].to_vec(),
             }
             .to_uri()
         });
@@ -309,18 +312,54 @@ impl Node {
 
     /// Téléphone : association avec le code (saisie manuelle ou QR).
     pub fn pair_with(&self, addr: &str, code: &str, pc_fingerprint: Option<&str>) -> Result<()> {
+        self.pair_with_addrs(&[addr.to_string()], code, pc_fingerprint)
+    }
+
+    /// Téléphone : association en essayant toutes les adresses connues du PC en parallèle
+    /// (plusieurs cartes réseau, partage de connexion, VPN), puis le câble USB (tunnel ADB)
+    /// si aucune ne répond. Les échecs sont expliqués en clair à l'utilisateur.
+    pub fn pair_with_addrs(
+        &self,
+        addrs: &[String],
+        code: &str,
+        pc_fingerprint: Option<&str>,
+    ) -> Result<()> {
         if self.inner.cfg.role != Role::Phone {
             return Err(CoreError::WrongRole("téléphone"));
         }
-        let addr: SocketAddr = addr.parse().map_err(|_| CoreError::BadAddress)?;
+        let mut list: Vec<SocketAddr> = Vec::new();
+        for a in addrs {
+            if let Ok(sa) = a.trim().parse::<SocketAddr>() {
+                if !list.contains(&sa) {
+                    list.push(sa);
+                }
+            }
+        }
+        if list.is_empty() && addrs.iter().any(|a| !a.trim().is_empty()) {
+            return Err(CoreError::BadAddress);
+        }
+        let usb = SocketAddr::from(([127, 0, 0, 1], nc_transport::DEFAULT_PORT));
+        list.retain(|a| *a != usb);
         let code = nc_pairing::normalize_code(code).map_err(|_| CoreError::BadAddress)?;
         let fp = pc_fingerprint.map(str::to_string);
         let inner = self.inner.clone();
         self.rt().spawn(async move {
-            match handshake::connect_pairing(addr, &inner.identity, &code, fp.as_deref()).await {
+            // Wi-Fi d'abord ; le câble USB ensuite (un câble branché sur un autre PC ne doit
+            // pas passer avant le PC visé).
+            let mut stream = first_reachable(&list).await;
+            if stream.is_none() {
+                stream = first_reachable(&[usb]).await;
+            }
+            let Some(stream) = stream else {
+                inner.emit(Event::PairingFailed {
+                    reason: UNREACHABLE.into(),
+                });
+                return;
+            };
+            match handshake::pairing_over(stream, &inner.identity, &code, fp.as_deref()).await {
                 Ok(est) => session::run(inner, est, true).await,
                 Err(e) => inner.emit(Event::PairingFailed {
-                    reason: e.to_string(),
+                    reason: pairing_error_text(&e),
                 }),
             }
         });
@@ -330,16 +369,17 @@ impl Node {
     /// Téléphone : association depuis le contenu d'un QR code.
     pub fn pair_with_qr(&self, uri: &str) -> Result<()> {
         let q = QrPayload::parse(uri).map_err(|_| CoreError::BadAddress)?;
-        let host = if q.host.contains(':') {
-            format!("[{}]", q.host)
-        } else {
-            q.host.clone()
-        };
-        self.pair_with(
-            &format!("{host}:{}", q.port),
-            &q.code,
-            Some(&q.pc_fingerprint),
-        )
+        let addrs: Vec<String> = std::iter::once(&q.host)
+            .chain(q.extra_hosts.iter())
+            .map(|h| {
+                if h.contains(':') {
+                    format!("[{h}]:{}", q.port)
+                } else {
+                    format!("{h}:{}", q.port)
+                }
+            })
+            .collect();
+        self.pair_with_addrs(&addrs, &q.code, Some(&q.pc_fingerprint))
     }
 
     // ------------------------------------------------------------------ appareils
@@ -758,6 +798,41 @@ async fn upgrade_to_usb(inner: &Arc<Inner>, pc: &DeviceRecord) {
     if usb_ready && connect_to(inner, &key, usb_addr()).await.is_ok() {
         tracing::info!("liaison basculée sur USB");
     }
+}
+
+const UNREACHABLE: &str = "Le PC ne répond pas. Vérifiez que NOTHING CONNECT est ouvert sur le PC et que les deux appareils sont sur le même réseau. Sur un partage de connexion ou un Wi-Fi public, Windows bloque souvent les connexions : sur le PC, touchez « Autoriser dans le pare-feu » dans la fenêtre d'association. Autre solution : reliez le téléphone au PC par câble USB (débogage USB activé).";
+
+/// Explication en clair d'un échec d'association.
+fn pairing_error_text(e: &nc_transport::TransportError) -> String {
+    use nc_transport::TransportError as T;
+    match e {
+        T::Timeout => "Le PC n'a pas terminé l'association à temps. Vérifiez que la fenêtre « Associer un téléphone » est toujours ouverte sur le PC, puis réessayez.".into(),
+        T::Pairing(_) => "Code invalide : saisissez les 6 chiffres affichés sur le PC.".into(),
+        T::Noise(_) | T::PairingFailed | T::Closed => "Association refusée par le PC : code incorrect ou expiré (il change toutes les 2 minutes), ou demande refusée sur le PC. Ouvrez un nouveau code et réessayez.".into(),
+        T::PeerMismatch => "Ce PC ne correspond pas au QR code scanné (empreinte différente).".into(),
+        T::Io(_) => UNREACHABLE.into(),
+        other => format!("Association impossible : {other}"),
+    }
+}
+
+/// Première adresse qui accepte une connexion TCP (essais en parallèle, 4 s au plus).
+async fn first_reachable(list: &[SocketAddr]) -> Option<tokio::net::TcpStream> {
+    let mut set = tokio::task::JoinSet::new();
+    for a in list.iter().copied() {
+        set.spawn(async move {
+            tokio::time::timeout(Duration::from_secs(4), tokio::net::TcpStream::connect(a))
+                .await
+                .ok()?
+                .ok()
+        });
+    }
+    while let Some(r) = set.join_next().await {
+        if let Ok(Some(s)) = r {
+            set.abort_all();
+            return Some(s);
+        }
+    }
+    None
 }
 
 /// Message de contrôle écrit par une plateforme (JSON) ; un type inconnu est refusé ici

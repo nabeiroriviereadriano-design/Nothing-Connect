@@ -143,22 +143,31 @@ impl Spake {
     }
 }
 
-/// Contenu d'un QR code d'association : `ncpair://<hôte>:<port>?c=<code>&f=<empreinte PC>`.
+/// Contenu d'un QR code d'association :
+/// `ncpair://<hôte>:<port>?c=<code>&f=<empreinte PC>[&a=<autres adresses du PC>]`.
 /// Ne contient que des données temporaires + l'empreinte publique du PC (non secrète).
+/// `a` liste les autres adresses IPv4 du PC (plusieurs cartes réseau, VPN, partage de
+/// connexion) ; les anciennes versions l'ignorent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QrPayload {
     pub host: String,
     pub port: u16,
     pub code: String,
     pub pc_fingerprint: String,
+    pub extra_hosts: Vec<String>,
 }
 
 impl QrPayload {
     pub fn to_uri(&self) -> String {
-        format!(
+        let mut s = format!(
             "ncpair://{}:{}?c={}&f={}",
             self.host, self.port, self.code, self.pc_fingerprint
-        )
+        );
+        if !self.extra_hosts.is_empty() {
+            s.push_str("&a=");
+            s.push_str(&self.extra_hosts.join(","));
+        }
+        s
     }
 
     pub fn parse(uri: &str) -> Result<Self, PairingError> {
@@ -168,11 +177,19 @@ impl QrPayload {
         let (hostport, query) = rest.split_once('?').ok_or(PairingError::BadFormat)?;
         let (host, port) = hostport.rsplit_once(':').ok_or(PairingError::BadFormat)?;
         let port: u16 = port.parse().map_err(|_| PairingError::BadFormat)?;
-        let (mut code, mut fp) = (None, None);
+        let (mut code, mut fp, mut extra) = (None, None, Vec::new());
         for kv in query.split('&') {
             match kv.split_once('=') {
                 Some(("c", v)) => code = Some(normalize_code(v)?),
                 Some(("f", v)) if v.len() <= 64 => fp = Some(v.to_string()),
+                Some(("a", v)) => {
+                    extra = v
+                        .split(',')
+                        .filter(|h| !h.is_empty() && h.len() <= 64)
+                        .take(8)
+                        .map(str::to_string)
+                        .collect()
+                }
                 _ => {}
             }
         }
@@ -187,6 +204,7 @@ impl QrPayload {
             port,
             code: code.ok_or(PairingError::BadFormat)?,
             pc_fingerprint: fp.ok_or(PairingError::BadFormat)?,
+            extra_hosts: extra,
         })
     }
 }
@@ -235,12 +253,28 @@ mod tests {
     }
 
     #[test]
+    fn qr_with_extra_hosts_roundtrip_and_old_format() {
+        let q = QrPayload {
+            host: "192.168.1.10".into(),
+            port: 47820,
+            code: "123456".into(),
+            pc_fingerprint: "ABCD-EF01-2345-6789".into(),
+            extra_hosts: vec!["10.0.0.5".into(), "172.20.10.2".into()],
+        };
+        assert_eq!(QrPayload::parse(&q.to_uri()).unwrap(), q);
+        // Un QR d'une ancienne version (sans « a ») reste lisible.
+        let old = QrPayload::parse("ncpair://192.168.1.10:47820?c=123456&f=AB").unwrap();
+        assert!(old.extra_hosts.is_empty());
+    }
+
+    #[test]
     fn qr_roundtrip() {
         let q = QrPayload {
             host: "192.168.1.20".into(),
             port: 47820,
             code: "004217".into(),
             pc_fingerprint: "AB12-CD34-EF56-7890".into(),
+            extra_hosts: vec![],
         };
         assert_eq!(QrPayload::parse(&q.to_uri()).unwrap(), q);
         assert!(QrPayload::parse("http://x").is_err());

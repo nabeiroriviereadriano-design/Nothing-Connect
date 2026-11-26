@@ -208,8 +208,14 @@ export const api = {
   displayStop: () => invoke<void>("display_stop"),
   displayTune: (scale: number, quality: number, fps: number, touch: boolean) => invoke<void>("display_tune", { scale, quality, fps, touch }),
   uiPrefsGet: () => invoke<Record<string, unknown>>("ui_prefs_get"),
+  firewallStatus: () => invoke<FirewallStatus>("firewall_status"),
+  firewallAllow: () => invoke<void>("firewall_allow"),
   uiPrefsSet: (prefs: object) => invoke<void>("ui_prefs_set", { prefs }),
 };
+
+export interface FirewallStatus {
+  supported: boolean; public_network: boolean; allowed_public: boolean; blocked: boolean; needs_fix: boolean;
+}
 
 export interface DisplayStatus {
   supported: boolean; installed: boolean; testsigning: boolean; active_peer: string | null;

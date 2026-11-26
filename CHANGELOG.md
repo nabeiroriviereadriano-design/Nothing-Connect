@@ -1,5 +1,12 @@
 # Notes de version
 
+## 0.4.1
+
+- **Association plus fiable** : le QR code contient toutes les adresses du PC (plusieurs cartes réseau, VPN, partage de connexion) et le téléphone les essaie toutes en même temps ; si aucune ne répond, il essaie le câble USB (débogage USB activé), même pour la première association.
+- **Pare-feu Windows** : sur un réseau « Public » (partage de connexion, Wi-Fi public) ou si une règle bloque NOTHING CONNECT, la fenêtre d'association le signale et propose « Autoriser dans le pare-feu » (une autorisation administrateur). Le désinstalleur retire cette règle.
+- Messages d'échec clairs sur le téléphone : PC injoignable, code incorrect ou expiré, demande refusée.
+- Écran étendu : quand le clavier du téléphone est ouvert, le bouton flottant passe au-dessus et le masque d'un toucher.
+
 ## 0.4.0
 
 - **Écran étendu tactile** : le téléphone devient un vrai écran tactile pour Windows (toucher multipoint) : glisser pour défiler, pincer pour zoomer, appui long pour le clic droit, déplacer une fenêtre par sa barre de titre. Le mode souris reste disponible (réglage « Toucher »).

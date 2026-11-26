@@ -103,7 +103,7 @@ const T: Duration = Duration::from_secs(20);
 
 /// Associe un téléphone à un PC et renvoie (id du téléphone vu du PC, id du PC vu du téléphone).
 fn pair(pc: &Peer, phone: &Peer) -> (String, String) {
-    let info = pc.node.open_pairing(Some("127.0.0.1")).unwrap();
+    let info = pc.node.open_pairing(&["127.0.0.1".to_string()]).unwrap();
     phone
         .node
         .pair_with_qr(info.qr_uri.as_deref().unwrap())
@@ -159,7 +159,7 @@ fn pairing_with_code_and_confirmation() {
 fn pairing_rejected_by_user() {
     let pc = peer(Role::Pc);
     let phone = peer(Role::Phone);
-    let info = pc.node.open_pairing(None).unwrap();
+    let info = pc.node.open_pairing(&[]).unwrap();
     let addr = pc.node.listen_addr().unwrap();
     phone
         .node
@@ -178,10 +178,50 @@ fn pairing_rejected_by_user() {
 }
 
 #[test]
+fn pairing_tries_every_address_of_the_pc() {
+    let pc = peer(Role::Pc);
+    let phone = peer(Role::Phone);
+    let port = pc.node.listen_addr().unwrap().port();
+    // Première adresse injoignable (autre carte réseau du PC), seconde valide.
+    let info = pc
+        .node
+        .open_pairing(&["127.0.0.2".to_string(), "127.0.0.1".to_string()])
+        .unwrap();
+    let uri = info.qr_uri.unwrap();
+    assert!(uri.contains("&a=127.0.0.1"));
+    // 127.0.0.2:port refuse la connexion (rien n'y écoute sous Linux comme sous Windows).
+    let _ = port;
+    phone.node.pair_with_qr(&uri).unwrap();
+    let id = pc.ev.wait(T, |e| match e {
+        Event::PairingRequest { peer_id, .. } => Some(peer_id.clone()),
+        _ => None,
+    });
+    pc.node.confirm_pairing(&id, true).unwrap();
+    phone
+        .ev
+        .wait(T, |e| matches!(e, Event::Paired { .. }).then_some(()));
+}
+
+#[test]
+fn unreachable_pc_gets_a_helpful_message() {
+    let phone = peer(Role::Phone);
+    // Port fermé : refus immédiat.
+    phone
+        .node
+        .pair_with_addrs(&["127.0.0.1:9".to_string()], "123456", None)
+        .unwrap();
+    let reason = phone.ev.wait(T, |e| match e {
+        Event::PairingFailed { reason } => Some(reason.clone()),
+        _ => None,
+    });
+    assert!(reason.contains("pare-feu"), "{reason}");
+}
+
+#[test]
 fn wrong_code_is_refused() {
     let pc = peer(Role::Pc);
     let phone = peer(Role::Phone);
-    let info = pc.node.open_pairing(None).unwrap();
+    let info = pc.node.open_pairing(&[]).unwrap();
     let wrong = if info.code == "000000" {
         "111111"
     } else {
@@ -192,9 +232,11 @@ fn wrong_code_is_refused() {
         .node
         .pair_with(&format!("127.0.0.1:{}", addr.port()), wrong, None)
         .unwrap();
-    phone.ev.wait(T, |e| {
-        matches!(e, Event::PairingFailed { .. }).then_some(())
+    let reason = phone.ev.wait(T, |e| match e {
+        Event::PairingFailed { reason } => Some(reason.clone()),
+        _ => None,
     });
+    assert!(reason.contains("code"), "{reason}");
     assert!(pc.node.devices().unwrap().is_empty());
 }
 

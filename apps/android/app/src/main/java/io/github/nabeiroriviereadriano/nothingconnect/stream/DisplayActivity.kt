@@ -102,6 +102,8 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
     private var resetting = false
     /** Toucher qui a fermé le menu : il n'est pas envoyé au PC. */
     private var swallow = false
+    private var imeVisible = false
+    private var imeHeight = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -499,10 +501,32 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
                         v.translationY = (startT + d).coerceIn(-lim, lim)
                     }
                 }
-                MotionEvent.ACTION_UP -> if (!moved) toggleMenu()
+                MotionEvent.ACTION_UP -> if (!moved) { if (imeVisible) hideKeyboard() else toggleMenu() }
             }
             true
         }
+        // Clavier affiché : le bouton passe au-dessus et devient « masquer le clavier ».
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            val visible = insets.isVisible(WindowInsetsCompat.Type.ime()) && ime > 0
+            if (visible != imeVisible || ime != imeHeight) {
+                imeVisible = visible
+                imeHeight = ime
+                fab.text = if (visible) "✕" else "•••"
+                fab.alpha = if (visible) 0.9f else 0.55f
+                fab.contentDescription = if (visible) "Masquer le clavier" else "Menu de l'écran étendu"
+                if (visible) {
+                    val limit = root.height / 2f - ime - fab.height / 2f - dp(16f)
+                    if (fab.translationY > limit) fab.translationY = limit
+                }
+            }
+            insets
+        }
+    }
+
+    private fun hideKeyboard() {
+        getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(keyboard.windowToken, 0)
+        keyboard.clearFocus()
     }
 
     private fun toggleMenu() {

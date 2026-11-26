@@ -179,6 +179,19 @@ impl NcNode {
             .unwrap()
             .pair_with(&addr, &code, pc_fingerprint.as_deref())?)
     }
+    /// Association en essayant toutes les adresses du PC (découverte), puis le câble USB.
+    pub fn pair_with_addrs(
+        &self,
+        addrs: Vec<String>,
+        code: String,
+        pc_fingerprint: Option<String>,
+    ) -> R<()> {
+        Ok(self
+            .node
+            .lock()
+            .unwrap()
+            .pair_with_addrs(&addrs, &code, pc_fingerprint.as_deref())?)
+    }
     pub fn pair_with_qr(&self, uri: String) -> R<()> {
         Ok(self.node.lock().unwrap().pair_with_qr(&uri)?)
     }
