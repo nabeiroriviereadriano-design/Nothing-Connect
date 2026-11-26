@@ -10,12 +10,16 @@ pub const SERVICE: &str = "NOTHING CONNECT";
 
 #[cfg(windows)]
 pub fn store(_data_dir: &std::path::Path) -> Box<dyn SecretStore> {
-    Box::new(nc_security::WindowsCredentialStore { service: SERVICE.into() })
+    Box::new(nc_security::WindowsCredentialStore {
+        service: SERVICE.into(),
+    })
 }
 
 #[cfg(not(windows))]
 pub fn store(data_dir: &std::path::Path) -> Box<dyn SecretStore> {
-    Box::new(dev::DevFileStore { dir: data_dir.join("dev-secrets") })
+    Box::new(dev::DevFileStore {
+        dir: data_dir.join("dev-secrets"),
+    })
 }
 
 #[cfg(not(windows))]
@@ -40,7 +44,8 @@ mod dev {
             std::fs::create_dir_all(&self.dir).map_err(|e| SecurityError::Store(e.to_string()))?;
             let p = self.dir.join(name);
             std::fs::write(&p, value).map_err(|e| SecurityError::Store(e.to_string()))?;
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).map_err(|e| SecurityError::Store(e.to_string()))
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| SecurityError::Store(e.to_string()))
         }
         fn delete(&self, name: &str) -> Result<(), SecurityError> {
             let _ = std::fs::remove_file(self.dir.join(name));

@@ -174,7 +174,11 @@ fn platform_str(p: Platform) -> &'static str {
     }
 }
 fn platform_from(s: &str) -> Platform {
-    if s == "windows" { Platform::Windows } else { Platform::Android }
+    if s == "windows" {
+        Platform::Windows
+    } else {
+        Platform::Android
+    }
 }
 
 impl Store {
@@ -195,16 +199,27 @@ impl Store {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         migrate(&mut conn)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn schema_version(&self) -> Result<u32> {
-        Ok(self.conn.lock().unwrap().pragma_query_value(None, "user_version", |r| r.get(0))?)
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .pragma_query_value(None, "user_version", |r| r.get(0))?)
     }
 
     // ---------- appareils ----------
 
-    pub fn upsert_device(&self, public_key: &[u8], info: &DeviceInfo, addr: Option<&str>) -> Result<DeviceRecord> {
+    pub fn upsert_device(
+        &self,
+        public_key: &[u8],
+        info: &DeviceInfo,
+        addr: Option<&str>,
+    ) -> Result<DeviceRecord> {
         let id = hex::encode(public_key);
         let now = now_ms();
         {
@@ -224,7 +239,10 @@ impl Store {
 
     pub fn device(&self, id: &str) -> Result<Option<DeviceRecord>> {
         let c = self.conn.lock().unwrap();
-        Ok(c.query_row("SELECT * FROM devices WHERE id = ?1", [id], row_device).optional()?)
+        Ok(
+            c.query_row("SELECT * FROM devices WHERE id = ?1", [id], row_device)
+                .optional()?,
+        )
     }
 
     pub fn device_by_key(&self, public_key: &[u8]) -> Result<Option<DeviceRecord>> {
@@ -233,8 +251,11 @@ impl Store {
 
     pub fn devices(&self) -> Result<Vec<DeviceRecord>> {
         let c = self.conn.lock().unwrap();
-        let mut st = c.prepare_cached("SELECT * FROM devices ORDER BY COALESCE(last_seen, paired_at) DESC")?;
-        let v = st.query_map([], row_device)?.collect::<std::result::Result<_, _>>()?;
+        let mut st =
+            c.prepare_cached("SELECT * FROM devices ORDER BY COALESCE(last_seen, paired_at) DESC")?;
+        let v = st
+            .query_map([], row_device)?
+            .collect::<std::result::Result<_, _>>()?;
         Ok(v)
     }
 
@@ -247,12 +268,18 @@ impl Store {
     }
 
     pub fn rename_device(&self, id: &str, custom: Option<&str>) -> Result<()> {
-        self.conn.lock().unwrap().execute("UPDATE devices SET custom_name = ?2 WHERE id = ?1", params![id, custom])?;
+        self.conn.lock().unwrap().execute(
+            "UPDATE devices SET custom_name = ?2 WHERE id = ?1",
+            params![id, custom],
+        )?;
         Ok(())
     }
 
     pub fn set_auto_accept(&self, id: &str, on: bool) -> Result<()> {
-        self.conn.lock().unwrap().execute("UPDATE devices SET auto_accept = ?2 WHERE id = ?1", params![id, on])?;
+        self.conn.lock().unwrap().execute(
+            "UPDATE devices SET auto_accept = ?2 WHERE id = ?1",
+            params![id, on],
+        )?;
         Ok(())
     }
 
@@ -271,7 +298,11 @@ impl Store {
 
     pub fn get_setting<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
         let c = self.conn.lock().unwrap();
-        let v: Option<String> = c.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?;
+        let v: Option<String> = c
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()?;
         Ok(match v {
             Some(s) => Some(serde_json::from_str(&s)?),
             None => None,
@@ -297,14 +328,26 @@ impl Store {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![t.id.to_string(), t.device_id, t.outgoing, t.created_at, t.finished_at, t.state, t.total_bytes as i64, t.dest_dir],
         )?;
-        tx.execute("DELETE FROM transfer_files WHERE transfer_id = ?1", [t.id.to_string()])?;
+        tx.execute(
+            "DELETE FROM transfer_files WHERE transfer_id = ?1",
+            [t.id.to_string()],
+        )?;
         {
             let mut st = tx.prepare_cached(
                 "INSERT INTO transfer_files (transfer_id, idx, rel_path, size, source_path, final_path, sha256, state)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for f in &t.files {
-                st.execute(params![t.id.to_string(), f.idx, f.rel_path, f.size as i64, f.source_path, f.final_path, f.sha256, f.state])?;
+                st.execute(params![
+                    t.id.to_string(),
+                    f.idx,
+                    f.rel_path,
+                    f.size as i64,
+                    f.source_path,
+                    f.final_path,
+                    f.sha256,
+                    f.state
+                ])?;
             }
         }
         tx.commit()?;
@@ -320,7 +363,14 @@ impl Store {
         Ok(())
     }
 
-    pub fn set_file_result(&self, id: &Uuid, idx: u32, state: &str, sha256: Option<&str>, final_path: Option<&str>) -> Result<()> {
+    pub fn set_file_result(
+        &self,
+        id: &Uuid,
+        idx: u32,
+        state: &str,
+        sha256: Option<&str>,
+        final_path: Option<&str>,
+    ) -> Result<()> {
         self.conn.lock().unwrap().execute(
             "UPDATE transfer_files SET state = ?3, sha256 = COALESCE(?4, sha256), final_path = COALESCE(?5, final_path)
              WHERE transfer_id = ?1 AND idx = ?2",
@@ -331,7 +381,13 @@ impl Store {
 
     pub fn transfer(&self, id: &Uuid) -> Result<Option<TransferRecord>> {
         let c = self.conn.lock().unwrap();
-        let t = c.query_row("SELECT * FROM transfers WHERE id = ?1", [id.to_string()], row_transfer).optional()?;
+        let t = c
+            .query_row(
+                "SELECT * FROM transfers WHERE id = ?1",
+                [id.to_string()],
+                row_transfer,
+            )
+            .optional()?;
         let Some(mut t) = t else { return Ok(None) };
         t.files = load_files(&c, &t.id)?;
         Ok(Some(t))
@@ -339,8 +395,11 @@ impl Store {
 
     pub fn transfers(&self, limit: u32) -> Result<Vec<TransferRecord>> {
         let c = self.conn.lock().unwrap();
-        let mut st = c.prepare_cached("SELECT * FROM transfers ORDER BY created_at DESC LIMIT ?1")?;
-        let mut v: Vec<TransferRecord> = st.query_map([limit], row_transfer)?.collect::<std::result::Result<_, _>>()?;
+        let mut st =
+            c.prepare_cached("SELECT * FROM transfers ORDER BY created_at DESC LIMIT ?1")?;
+        let mut v: Vec<TransferRecord> = st
+            .query_map([limit], row_transfer)?
+            .collect::<std::result::Result<_, _>>()?;
         for t in &mut v {
             t.files = load_files(&c, &t.id)?;
         }
@@ -354,7 +413,9 @@ impl Store {
             let mut st = c.prepare_cached(
                 "SELECT id FROM transfers WHERE device_id = ?1 AND outgoing = 1 AND state IN ('interrupted','paused')",
             )?;
-            let v = st.query_map([device_id], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
+            let v = st
+                .query_map([device_id], |r| r.get(0))?
+                .collect::<std::result::Result<_, _>>()?;
             v
         };
         let mut out = Vec::new();
@@ -377,8 +438,17 @@ impl Store {
 
     // ---------- notifications ----------
 
-    pub fn insert_notification(&self, device_id: &str, n: &nc_protocol::PhoneNotification, keep_content: bool) -> Result<()> {
-        let (title, body) = if keep_content { (n.title.as_deref(), n.text.as_deref()) } else { (None, None) };
+    pub fn insert_notification(
+        &self,
+        device_id: &str,
+        n: &nc_protocol::PhoneNotification,
+        keep_content: bool,
+    ) -> Result<()> {
+        let (title, body) = if keep_content {
+            (n.title.as_deref(), n.text.as_deref())
+        } else {
+            (None, None)
+        };
         self.conn.lock().unwrap().execute(
             "INSERT INTO notifications (device_id, nkey, package, app_name, title, body, posted_at, removed)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
@@ -399,7 +469,8 @@ impl Store {
 
     pub fn notifications(&self, limit: u32) -> Result<Vec<NotificationRecord>> {
         let c = self.conn.lock().unwrap();
-        let mut st = c.prepare_cached("SELECT * FROM notifications ORDER BY posted_at DESC LIMIT ?1")?;
+        let mut st =
+            c.prepare_cached("SELECT * FROM notifications ORDER BY posted_at DESC LIMIT ?1")?;
         let v = st
             .query_map([limit], |r| {
                 Ok(NotificationRecord {
@@ -427,13 +498,24 @@ impl Store {
     }
 
     pub fn clear_notifications(&self) -> Result<usize> {
-        Ok(self.conn.lock().unwrap().execute("DELETE FROM notifications", [])?)
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM notifications", [])?)
     }
 
-    pub fn set_notification_apps(&self, device_id: &str, apps: &[nc_protocol::AppEntry]) -> Result<()> {
+    pub fn set_notification_apps(
+        &self,
+        device_id: &str,
+        apps: &[nc_protocol::AppEntry],
+    ) -> Result<()> {
         let mut c = self.conn.lock().unwrap();
         let tx = c.transaction()?;
-        tx.execute("DELETE FROM notification_apps WHERE device_id = ?1", [device_id])?;
+        tx.execute(
+            "DELETE FROM notification_apps WHERE device_id = ?1",
+            [device_id],
+        )?;
         {
             let mut st = tx.prepare_cached("INSERT INTO notification_apps (device_id, package, app_name, enabled) VALUES (?1, ?2, ?3, ?4)")?;
             for a in apps {
@@ -448,12 +530,23 @@ impl Store {
         let c = self.conn.lock().unwrap();
         let mut st = c.prepare_cached("SELECT package, app_name, enabled FROM notification_apps WHERE device_id = ?1 ORDER BY app_name COLLATE NOCASE")?;
         let v = st
-            .query_map([device_id], |r| Ok(nc_protocol::AppEntry { package: r.get(0)?, app_name: r.get(1)?, enabled: r.get(2)? }))?
+            .query_map([device_id], |r| {
+                Ok(nc_protocol::AppEntry {
+                    package: r.get(0)?,
+                    app_name: r.get(1)?,
+                    enabled: r.get(2)?,
+                })
+            })?
             .collect::<std::result::Result<_, _>>()?;
         Ok(v)
     }
 
-    pub fn set_notification_app_enabled(&self, device_id: &str, package: &str, enabled: bool) -> Result<()> {
+    pub fn set_notification_app_enabled(
+        &self,
+        device_id: &str,
+        package: &str,
+        enabled: bool,
+    ) -> Result<()> {
         self.conn.lock().unwrap().execute(
             "UPDATE notification_apps SET enabled = ?3 WHERE device_id = ?1 AND package = ?2",
             params![device_id, package, enabled],
@@ -474,7 +567,10 @@ impl Store {
 fn migrate(conn: &mut Connection) -> Result<()> {
     let current: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     if current > SCHEMA_VERSION {
-        return Err(StorageError::TooNew { found: current, supported: SCHEMA_VERSION });
+        return Err(StorageError::TooNew {
+            found: current,
+            supported: SCHEMA_VERSION,
+        });
     }
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
         let tx = conn.transaction()?;
@@ -500,7 +596,8 @@ fn row_device(r: &rusqlite::Row) -> rusqlite::Result<DeviceRecord> {
         last_seen: r.get("last_seen")?,
         last_addr: r.get("last_addr")?,
         auto_accept: r.get("auto_accept")?,
-        capabilities: serde_json::from_str(&r.get::<_, String>("capabilities")?).unwrap_or_default(),
+        capabilities: serde_json::from_str(&r.get::<_, String>("capabilities")?)
+            .unwrap_or_default(),
     })
 }
 
@@ -520,7 +617,8 @@ fn row_transfer(r: &rusqlite::Row) -> rusqlite::Result<TransferRecord> {
 }
 
 fn load_files(c: &Connection, id: &Uuid) -> Result<Vec<TransferFileRecord>> {
-    let mut st = c.prepare_cached("SELECT * FROM transfer_files WHERE transfer_id = ?1 ORDER BY idx")?;
+    let mut st =
+        c.prepare_cached("SELECT * FROM transfer_files WHERE transfer_id = ?1 ORDER BY idx")?;
     let v = st
         .query_map([id.to_string()], |r| {
             Ok(TransferFileRecord {
@@ -560,13 +658,17 @@ mod tests {
         let p = dir.path().join("nc.db");
         {
             let s = Store::open(&p).unwrap();
-            s.upsert_device(&[1; 32], &info(), Some("10.0.0.2:1")).unwrap();
+            s.upsert_device(&[1; 32], &info(), Some("10.0.0.2:1"))
+                .unwrap();
             s.set_setting("theme", &"dark").unwrap();
         }
         let s = Store::open(&p).unwrap();
         assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
         assert_eq!(s.devices().unwrap().len(), 1);
-        assert_eq!(s.get_setting::<String>("theme").unwrap().as_deref(), Some("dark"));
+        assert_eq!(
+            s.get_setting::<String>("theme").unwrap().as_deref(),
+            Some("dark")
+        );
     }
 
     #[test]
@@ -593,7 +695,8 @@ mod tests {
         let p = dir.path().join("nc.db");
         {
             let c = Connection::open(&p).unwrap();
-            c.pragma_update(None, "user_version", SCHEMA_VERSION + 5).unwrap();
+            c.pragma_update(None, "user_version", SCHEMA_VERSION + 5)
+                .unwrap();
         }
         assert!(matches!(Store::open(&p), Err(StorageError::TooNew { .. })));
     }
@@ -607,10 +710,22 @@ mod tests {
         let d2 = s.device_by_key(&[2; 32]).unwrap().unwrap();
         assert_eq!(d2.display_name(), "Mon tel");
         assert!(d2.auto_accept);
-        s.insert_notification(&d.id, &PhoneNotification {
-            key: "k".into(), package: "p".into(), app_name: "A".into(), title: Some("t".into()), text: None,
-            posted_at: 1, icon_png_b64: None, actions: vec![], sensitive: false,
-        }, true).unwrap();
+        s.insert_notification(
+            &d.id,
+            &PhoneNotification {
+                key: "k".into(),
+                package: "p".into(),
+                app_name: "A".into(),
+                title: Some("t".into()),
+                text: None,
+                posted_at: 1,
+                icon_png_b64: None,
+                actions: vec![],
+                sensitive: false,
+            },
+            true,
+        )
+        .unwrap();
         assert!(s.remove_device(&d.id).unwrap());
         assert!(s.device_by_key(&[2; 32]).unwrap().is_none());
         assert!(s.notifications(10).unwrap().is_empty());
@@ -621,12 +736,28 @@ mod tests {
         let s = Store::open_in_memory().unwrap();
         let id = Uuid::new_v4();
         s.insert_transfer(&TransferRecord {
-            id, device_id: "d".into(), outgoing: true, created_at: 5, finished_at: None,
-            state: "interrupted".into(), total_bytes: 10, dest_dir: None,
-            files: vec![TransferFileRecord { idx: 0, rel_path: "a.txt".into(), size: 10, source_path: Some("/a.txt".into()), final_path: None, sha256: None, state: "pending".into() }],
-        }).unwrap();
+            id,
+            device_id: "d".into(),
+            outgoing: true,
+            created_at: 5,
+            finished_at: None,
+            state: "interrupted".into(),
+            total_bytes: 10,
+            dest_dir: None,
+            files: vec![TransferFileRecord {
+                idx: 0,
+                rel_path: "a.txt".into(),
+                size: 10,
+                source_path: Some("/a.txt".into()),
+                final_path: None,
+                sha256: None,
+                state: "pending".into(),
+            }],
+        })
+        .unwrap();
         assert_eq!(s.resumable_outgoing("d").unwrap().len(), 1);
-        s.set_file_result(&id, 0, "completed", Some("ab"), None).unwrap();
+        s.set_file_result(&id, 0, "completed", Some("ab"), None)
+            .unwrap();
         s.set_transfer_state(&id, "completed", true).unwrap();
         let t = s.transfer(&id).unwrap().unwrap();
         assert_eq!(t.files[0].sha256.as_deref(), Some("ab"));
@@ -637,10 +768,22 @@ mod tests {
     #[test]
     fn sensitive_content_not_stored_when_disabled() {
         let s = Store::open_in_memory().unwrap();
-        s.insert_notification("d", &PhoneNotification {
-            key: "k".into(), package: "p".into(), app_name: "A".into(), title: Some("secret".into()), text: Some("x".into()),
-            posted_at: 1, icon_png_b64: None, actions: vec![], sensitive: true,
-        }, false).unwrap();
+        s.insert_notification(
+            "d",
+            &PhoneNotification {
+                key: "k".into(),
+                package: "p".into(),
+                app_name: "A".into(),
+                title: Some("secret".into()),
+                text: Some("x".into()),
+                posted_at: 1,
+                icon_png_b64: None,
+                actions: vec![],
+                sensitive: true,
+            },
+            false,
+        )
+        .unwrap();
         let n = &s.notifications(1).unwrap()[0];
         assert!(n.title.is_none() && n.body.is_none());
     }
@@ -648,8 +791,17 @@ mod tests {
     #[test]
     fn notification_apps_filter() {
         let s = Store::open_in_memory().unwrap();
-        s.set_notification_apps("d", &[AppEntry { package: "com.whatsapp".into(), app_name: "WhatsApp".into(), enabled: true }]).unwrap();
-        s.set_notification_app_enabled("d", "com.whatsapp", false).unwrap();
+        s.set_notification_apps(
+            "d",
+            &[AppEntry {
+                package: "com.whatsapp".into(),
+                app_name: "WhatsApp".into(),
+                enabled: true,
+            }],
+        )
+        .unwrap();
+        s.set_notification_app_enabled("d", "com.whatsapp", false)
+            .unwrap();
         assert!(!s.notification_apps("d").unwrap()[0].enabled);
     }
 }

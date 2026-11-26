@@ -55,7 +55,11 @@ pub struct SourceFile {
 
 impl SourceFile {
     pub fn offered(&self) -> OfferedFile {
-        OfferedFile { rel_path: self.rel_path.clone(), size: self.size, modified_ms: self.modified_ms }
+        OfferedFile {
+            rel_path: self.rel_path.clone(),
+            size: self.size,
+            modified_ms: self.modified_ms,
+        }
     }
 }
 
@@ -97,7 +101,12 @@ fn source(p: &Path, rel: String, meta: &fs::Metadata) -> SourceFile {
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_millis() as i64);
-    SourceFile { path: p.to_path_buf(), rel_path: rel, size: meta.len(), modified_ms }
+    SourceFile {
+        path: p.to_path_buf(),
+        rel_path: rel,
+        size: meta.len(),
+        modified_ms,
+    }
 }
 
 fn walk(dir: &Path, prefix: &str, out: &mut Vec<SourceFile>) -> Result<()> {
@@ -122,8 +131,8 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<SourceFile>) -> Result<()> {
 }
 
 const WINDOWS_RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
 /// Transforme un chemin relatif reçu en chemin sûr sous `dest`.
@@ -141,7 +150,13 @@ pub fn safe_relative(rel: &str) -> Result<PathBuf> {
         }
         let mut clean: String = part
             .chars()
-            .map(|c| if matches!(c, '<' | '>' | '"' | '|' | '?' | '*') || c.is_control() { '_' } else { c })
+            .map(|c| {
+                if matches!(c, '<' | '>' | '"' | '|' | '?' | '*') || c.is_control() {
+                    '_'
+                } else {
+                    c
+                }
+            })
             .collect();
         clean = clean.trim_end_matches([' ', '.']).to_string();
         if clean.is_empty() {
@@ -187,7 +202,12 @@ impl OutgoingFile {
         file.seek(SeekFrom::Start(0))?;
         let mut hasher = Sha256::new();
         hash_prefix(&mut file, offset, &mut hasher)?;
-        Ok(Self { file, size, pos: offset, hasher })
+        Ok(Self {
+            file,
+            size,
+            pos: offset,
+            hasher,
+        })
     }
 
     pub fn position(&self) -> u64 {
@@ -207,7 +227,11 @@ impl OutgoingFile {
         let start = buf.len();
         buf.resize(start + want, 0);
         self.file.read_exact(&mut buf[start..]).map_err(|e| {
-            if e.kind() == io::ErrorKind::UnexpectedEof { TransferError::SourceChanged } else { e.into() }
+            if e.kind() == io::ErrorKind::UnexpectedEof {
+                TransferError::SourceChanged
+            } else {
+                e.into()
+            }
         })?;
         self.hasher.update(&buf[start..]);
         let off = self.pos;
@@ -263,7 +287,8 @@ impl FileOutcome {
 
 /// Chemin du fichier partiel d'un transfert.
 pub fn partial_path(dest: &Path, id: &Uuid, idx: u32) -> PathBuf {
-    dest.join(PARTIAL_DIR).join(format!("{}-{idx}.ncpart", id.simple()))
+    dest.join(PARTIAL_DIR)
+        .join(format!("{}-{idx}.ncpart", id.simple()))
 }
 
 /// Offsets de reprise pour une offre : taille déjà reçue de chaque fichier partiel.
@@ -271,10 +296,12 @@ pub fn resume_offsets(dest: &Path, id: &Uuid, files: &[OfferedFile]) -> Vec<u64>
     files
         .iter()
         .enumerate()
-        .map(|(i, f)| match fs::metadata(partial_path(dest, id, i as u32)) {
-            Ok(m) if m.len() <= f.size => m.len(),
-            _ => 0,
-        })
+        .map(
+            |(i, f)| match fs::metadata(partial_path(dest, id, i as u32)) {
+                Ok(m) if m.len() <= f.size => m.len(),
+                _ => 0,
+            },
+        )
         .collect()
 }
 
@@ -291,13 +318,28 @@ pub struct IncomingFile {
 
 impl IncomingFile {
     /// Prépare la réception (reprend un fichier partiel si `offset` > 0).
-    pub fn open(dest: &Path, id: &Uuid, idx: u32, offered: &OfferedFile, offset: u64) -> Result<Self> {
+    pub fn open(
+        dest: &Path,
+        id: &Uuid,
+        idx: u32,
+        offered: &OfferedFile,
+        offset: u64,
+    ) -> Result<Self> {
         let final_rel = safe_relative(&offered.rel_path)?;
         let partial = partial_path(dest, id, idx);
         fs::create_dir_all(partial.parent().unwrap())?;
-        let mut file = OpenOptions::new().create(true).read(true).write(true).truncate(false).open(&partial)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&partial)?;
         let existing = file.metadata()?.len();
-        let offset = if offset <= existing && offset <= offered.size { offset } else { 0 };
+        let offset = if offset <= existing && offset <= offered.size {
+            offset
+        } else {
+            0
+        };
         file.set_len(offset)?;
         file.seek(SeekFrom::Start(0))?;
         let mut hasher = Sha256::new();
@@ -320,7 +362,10 @@ impl IncomingFile {
 
     pub fn write_chunk(&mut self, offset: u64, data: &[u8]) -> Result<()> {
         if offset != self.pos {
-            return Err(TransferError::OutOfOrder { expected: self.pos, got: offset });
+            return Err(TransferError::OutOfOrder {
+                expected: self.pos,
+                got: offset,
+            });
         }
         if self.pos + data.len() as u64 > self.size {
             return Err(TransferError::Overflow);
@@ -339,9 +384,16 @@ impl IncomingFile {
     }
 
     /// Vérifie l'empreinte puis place le fichier à sa destination finale.
-    pub fn finish(mut self, expected_sha256: &str, policy: ConflictPolicy) -> Result<(FileOutcome, String)> {
+    pub fn finish(
+        mut self,
+        expected_sha256: &str,
+        policy: ConflictPolicy,
+    ) -> Result<(FileOutcome, String)> {
         if self.pos != self.size {
-            return Err(TransferError::Incomplete { got: self.pos, expected: self.size });
+            return Err(TransferError::Incomplete {
+                got: self.pos,
+                expected: self.size,
+            });
         }
         self.out.flush()?;
         self.out.get_ref().sync_all()?;
@@ -409,8 +461,17 @@ pub fn purge_stale_partials(dest: &Path, max_age: std::time::Duration) -> usize 
     let mut n = 0;
     if let Ok(rd) = fs::read_dir(&dir) {
         for e in rd.flatten() {
-            let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|a| a > max_age).unwrap_or(false);
-            if old && e.path().extension().map(|x| x == "ncpart").unwrap_or(false) && fs::remove_file(e.path()).is_ok() {
+            let old = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .map(|a| a > max_age)
+                .unwrap_or(false);
+            if old
+                && e.path().extension().map(|x| x == "ncpart").unwrap_or(false)
+                && fs::remove_file(e.path()).is_ok()
+            {
                 n += 1;
             }
         }
@@ -432,8 +493,14 @@ fn replace(from: &Path, to: &Path) -> io::Result<()> {
 }
 
 fn unique_name(target: &Path) -> PathBuf {
-    let stem = target.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let ext = target.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let stem = target
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = target
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
     let parent = target.parent().unwrap_or(Path::new(""));
     (1..)
         .map(|i| parent.join(format!("{stem} ({i}){ext}")))
@@ -468,11 +535,20 @@ mod tests {
         p
     }
 
-    fn send_all(src: &SourceFile, from: u64, inc: &mut IncomingFile, chunk: usize, stop_after: Option<usize>) -> Option<String> {
+    fn send_all(
+        src: &SourceFile,
+        from: u64,
+        inc: &mut IncomingFile,
+        chunk: usize,
+        stop_after: Option<usize>,
+    ) -> Option<String> {
         let mut o = OutgoingFile::open(src, from).unwrap();
         let mut buf = Vec::new();
         let mut count = 0;
-        while let Some((off, _)) = { buf.clear(); o.next_chunk(&mut buf, chunk).unwrap() } {
+        while let Some((off, _)) = {
+            buf.clear();
+            o.next_chunk(&mut buf, chunk).unwrap()
+        } {
             inc.write_chunk(off, &buf).unwrap();
             count += 1;
             if Some(count) == stop_after {
@@ -494,7 +570,10 @@ mod tests {
         let (out, digest) = inc.finish(&sha, ConflictPolicy::KeepBoth).unwrap();
         assert_eq!(digest, file_sha256(&p).unwrap());
         assert_eq!(fs::read(out.path()).unwrap(), fs::read(&p).unwrap());
-        assert!(!d.path().join(PARTIAL_DIR).exists(), "dossier partiel nettoyé");
+        assert!(
+            !d.path().join(PARTIAL_DIR).exists(),
+            "dossier partiel nettoyé"
+        );
     }
 
     #[test]
@@ -525,18 +604,34 @@ mod tests {
         let id = Uuid::new_v4();
         let mut inc = IncomingFile::open(d.path(), &id, 0, &src.offered(), 0).unwrap();
         send_all(src, 0, &mut inc, 4096, None).unwrap();
-        assert!(matches!(inc.finish(&"0".repeat(64), ConflictPolicy::KeepBoth), Err(TransferError::HashMismatch)));
+        assert!(matches!(
+            inc.finish(&"0".repeat(64), ConflictPolicy::KeepBoth),
+            Err(TransferError::HashMismatch)
+        ));
         assert!(!partial_path(d.path(), &id, 0).exists());
     }
 
     #[test]
     fn out_of_order_and_overflow_refused() {
         let d = tempfile::tempdir().unwrap();
-        let f = OfferedFile { rel_path: "x".into(), size: 4, modified_ms: None };
+        let f = OfferedFile {
+            rel_path: "x".into(),
+            size: 4,
+            modified_ms: None,
+        };
         let mut inc = IncomingFile::open(d.path(), &Uuid::new_v4(), 0, &f, 0).unwrap();
-        assert!(matches!(inc.write_chunk(2, b"ab"), Err(TransferError::OutOfOrder { .. })));
-        assert!(matches!(inc.write_chunk(0, b"abcde"), Err(TransferError::Overflow)));
-        assert!(matches!(inc.finish("", ConflictPolicy::Skip), Err(TransferError::Incomplete { .. })));
+        assert!(matches!(
+            inc.write_chunk(2, b"ab"),
+            Err(TransferError::OutOfOrder { .. })
+        ));
+        assert!(matches!(
+            inc.write_chunk(0, b"abcde"),
+            Err(TransferError::Overflow)
+        ));
+        assert!(matches!(
+            inc.finish("", ConflictPolicy::Skip),
+            Err(TransferError::Incomplete { .. })
+        ));
     }
 
     #[test]
@@ -547,17 +642,36 @@ mod tests {
         fs::write(d.path().join("doc.txt"), b"autre contenu").unwrap();
         let src = &plan(std::slice::from_ref(&p)).unwrap()[0];
         let run = |policy| {
-            let mut inc = IncomingFile::open(d.path(), &Uuid::new_v4(), 0, &src.offered(), 0).unwrap();
+            let mut inc =
+                IncomingFile::open(d.path(), &Uuid::new_v4(), 0, &src.offered(), 0).unwrap();
             let sha = send_all(src, 0, &mut inc, 64, None).unwrap();
             inc.finish(&sha, policy).unwrap().0
         };
-        assert_eq!(run(ConflictPolicy::KeepBoth), FileOutcome::Saved(d.path().join("doc (1).txt")));
-        assert_eq!(run(ConflictPolicy::Skip), FileOutcome::Skipped(d.path().join("doc.txt")));
-        assert_eq!(fs::read(d.path().join("doc.txt")).unwrap(), b"autre contenu");
-        assert_eq!(run(ConflictPolicy::Replace), FileOutcome::Saved(d.path().join("doc.txt")));
-        assert_eq!(fs::read(d.path().join("doc.txt")).unwrap(), fs::read(&p).unwrap());
+        assert_eq!(
+            run(ConflictPolicy::KeepBoth),
+            FileOutcome::Saved(d.path().join("doc (1).txt"))
+        );
+        assert_eq!(
+            run(ConflictPolicy::Skip),
+            FileOutcome::Skipped(d.path().join("doc.txt"))
+        );
+        assert_eq!(
+            fs::read(d.path().join("doc.txt")).unwrap(),
+            b"autre contenu"
+        );
+        assert_eq!(
+            run(ConflictPolicy::Replace),
+            FileOutcome::Saved(d.path().join("doc.txt"))
+        );
+        assert_eq!(
+            fs::read(d.path().join("doc.txt")).unwrap(),
+            fs::read(&p).unwrap()
+        );
         // Même contenu déjà présent : pas de doublon.
-        assert_eq!(run(ConflictPolicy::KeepBoth), FileOutcome::AlreadyPresent(d.path().join("doc.txt")));
+        assert_eq!(
+            run(ConflictPolicy::KeepBoth),
+            FileOutcome::AlreadyPresent(d.path().join("doc.txt"))
+        );
     }
 
     #[test]
@@ -577,8 +691,14 @@ mod tests {
         assert!(safe_relative("../../etc/passwd").is_err());
         assert!(safe_relative("C:/Windows/x").is_err());
         assert!(safe_relative("").is_err());
-        assert_eq!(safe_relative("/abs/x.txt").unwrap(), PathBuf::from("abs").join("x.txt"));
-        assert_eq!(safe_relative("a\\b?.txt").unwrap(), PathBuf::from("a").join("b_.txt"));
+        assert_eq!(
+            safe_relative("/abs/x.txt").unwrap(),
+            PathBuf::from("abs").join("x.txt")
+        );
+        assert_eq!(
+            safe_relative("a\\b?.txt").unwrap(),
+            PathBuf::from("a").join("b_.txt")
+        );
         assert_eq!(safe_relative("CON.txt").unwrap(), PathBuf::from("_CON.txt"));
         assert_eq!(safe_relative("name. ").unwrap(), PathBuf::from("name"));
     }
@@ -589,7 +709,10 @@ mod tests {
         let p = random_file(s.path(), "m.bin", 100);
         let mut src = plan(&[p]).unwrap()[0].clone();
         src.size = 50;
-        assert!(matches!(OutgoingFile::open(&src, 0), Err(TransferError::SourceChanged)));
+        assert!(matches!(
+            OutgoingFile::open(&src, 0),
+            Err(TransferError::SourceChanged)
+        ));
     }
 
     #[test]

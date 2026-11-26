@@ -27,7 +27,9 @@ pub const HIDDEN_ARG: &str = "--hidden";
 pub const PURGE_ARG: &str = "--purge-secrets";
 
 fn device_info() -> DeviceInfo {
-    let name = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_else(|_| "PC".into());
+    let name = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "PC".into());
     DeviceInfo {
         name,
         platform: Platform::Windows,
@@ -52,7 +54,10 @@ fn init_logs(dir: &std::path::Path) {
         let _ = tracing_subscriber::fmt()
             .with_writer(appender)
             .with_ansi(false)
-            .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "info".into()),
+            )
             .try_init();
     }
 }
@@ -65,12 +70,24 @@ pub fn run() {
         return;
     }
     let start_hidden = args.iter().any(|a| a == HIDDEN_ARG);
-    let files_from_cli: Vec<PathBuf> = args.iter().skip(1).filter(|a| !a.starts_with("--")).map(PathBuf::from).filter(|p| p.exists()).collect();
+    let files_from_cli: Vec<PathBuf> = args
+        .iter()
+        .skip(1)
+        .filter(|a| !a.starts_with("--"))
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .collect();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // Deuxième lancement (ou « Envoyer vers ») : réutilise l'instance existante.
-            let files: Vec<String> = argv.iter().skip(1).filter(|a| !a.starts_with("--")).filter(|p| std::path::Path::new(p).exists()).cloned().collect();
+            let files: Vec<String> = argv
+                .iter()
+                .skip(1)
+                .filter(|a| !a.starts_with("--"))
+                .filter(|p| std::path::Path::new(p).exists())
+                .cloned()
+                .collect();
             tray::show_main(app);
             if !files.is_empty() {
                 use tauri::Emitter;
@@ -78,7 +95,10 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec![HIDDEN_ARG])))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![HIDDEN_ARG]),
+        ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -87,11 +107,17 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             init_logs(&data_dir);
-            let download_dir = dirs::download_dir().unwrap_or_else(|| data_dir.clone()).join("NOTHING CONNECT");
+            let download_dir = dirs::download_dir()
+                .unwrap_or_else(|| data_dir.clone())
+                .join("NOTHING CONNECT");
             let secrets = secrets::store(&data_dir);
             let settings = Arc::new(RwLock::new(Settings::default()));
             let snapshot = Arc::new(Mutex::new(sink::Snapshot::default()));
-            let sink = Arc::new(sink::TauriSink::new(app.handle().clone(), settings.clone(), snapshot.clone()));
+            let sink = Arc::new(sink::TauriSink::new(
+                app.handle().clone(),
+                settings.clone(),
+                snapshot.clone(),
+            ));
             let cfg = NodeConfig {
                 role: Role::Pc,
                 data_dir: data_dir.clone(),
@@ -104,14 +130,23 @@ pub fn run() {
             *settings.write().unwrap() = node.settings();
             node.start().map_err(|e| e.to_string())?;
             tracing::info!("NOTHING CONNECT {} démarré", env!("CARGO_PKG_VERSION"));
-            app.manage(AppState { node: Mutex::new(node), settings, data_dir, secrets, snapshot });
+            app.manage(AppState {
+                node: Mutex::new(node),
+                settings,
+                data_dir,
+                secrets,
+                snapshot,
+            });
             tray::create(app.handle())?;
             if !start_hidden {
                 tray::show_main(app.handle());
             }
             if !files_from_cli.is_empty() {
                 use tauri::Emitter;
-                let files: Vec<String> = files_from_cli.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                let files: Vec<String> = files_from_cli
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
                 let h = app.handle().clone();
                 // Laisse l'interface s'abonner avant d'envoyer la demande.
                 std::thread::spawn(move || {

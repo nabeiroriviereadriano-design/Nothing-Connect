@@ -1,6 +1,8 @@
 //! Événements émis vers l'interface (Tauri ou Android), sérialisés en JSON (`"type"`).
 
-use nc_protocol::{AppEntry, DeviceInfo, DeviceStatus, MediaSessionInfo, Message, PhoneNotification, ShareKind};
+use nc_protocol::{
+    AppEntry, DeviceInfo, DeviceStatus, MediaSessionInfo, Message, PhoneNotification, ShareKind,
+};
 use nc_storage::DeviceRecord;
 use serde::Serialize;
 use uuid::Uuid;
@@ -34,7 +36,10 @@ impl TransferState {
         }
     }
     pub fn is_final(&self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled | Self::Rejected)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Rejected
+        )
     }
 }
 
@@ -47,29 +52,91 @@ pub struct TransferFileView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    Started { fingerprint: String, port: Option<u16> },
-    PairingWindow { code: String, expires_in_s: u64, qr_uri: Option<String> },
+    Started {
+        fingerprint: String,
+        port: Option<u16>,
+    },
+    PairingWindow {
+        code: String,
+        expires_in_s: u64,
+        qr_uri: Option<String>,
+    },
     PairingWindowClosed,
     /// Côté PC : un téléphone a prouvé le code, l'utilisateur doit confirmer.
-    PairingRequest { peer_id: String, device: DeviceInfo, fingerprint: String },
-    Paired { device: DeviceRecord },
-    PairingFailed { reason: String },
-    PeerConnected { peer_id: String, addr: String, link: &'static str },
-    PeerDisconnected { peer_id: String, reason: String },
+    PairingRequest {
+        peer_id: String,
+        device: DeviceInfo,
+        fingerprint: String,
+    },
+    Paired {
+        device: DeviceRecord,
+    },
+    PairingFailed {
+        reason: String,
+    },
+    PeerConnected {
+        peer_id: String,
+        addr: String,
+        link: &'static str,
+    },
+    PeerDisconnected {
+        peer_id: String,
+        reason: String,
+    },
     /// Le pair a refusé notre clé : association révoquée de son côté.
-    PeerRefused { peer_id: String },
-    DeviceRemoved { peer_id: String },
-    IncompatibleVersion { peer_id: Option<String>, remote: u16, local: u16 },
-    Status { peer_id: String, status: DeviceStatus },
-    Notification { peer_id: String, notification: PhoneNotification },
-    NotificationRemoved { peer_id: String, key: String },
-    NotificationApps { peer_id: String, apps: Vec<AppEntry> },
-    MediaSessions { peer_id: String, sessions: Vec<MediaSessionInfo> },
-    Share { peer_id: String, kind: ShareKind, content: String },
-    CommandResult { peer_id: String, id: u64, ok: bool, error: Option<String> },
+    PeerRefused {
+        peer_id: String,
+    },
+    DeviceRemoved {
+        peer_id: String,
+    },
+    IncompatibleVersion {
+        peer_id: Option<String>,
+        remote: u16,
+        local: u16,
+    },
+    Status {
+        peer_id: String,
+        status: DeviceStatus,
+    },
+    Notification {
+        peer_id: String,
+        notification: PhoneNotification,
+    },
+    NotificationRemoved {
+        peer_id: String,
+        key: String,
+    },
+    NotificationApps {
+        peer_id: String,
+        apps: Vec<AppEntry>,
+    },
+    MediaSessions {
+        peer_id: String,
+        sessions: Vec<MediaSessionInfo>,
+    },
+    Share {
+        peer_id: String,
+        kind: ShareKind,
+        content: String,
+    },
+    CommandResult {
+        peer_id: String,
+        id: u64,
+        ok: bool,
+        error: Option<String>,
+    },
     /// Demande que la plateforme doit exécuter (commande, action de notification, média…).
-    Request { peer_id: String, message: Message },
-    TransferIncoming { id: Uuid, peer_id: String, files: Vec<TransferFileView>, total_bytes: u64 },
+    Request {
+        peer_id: String,
+        message: Message,
+    },
+    TransferIncoming {
+        id: Uuid,
+        peer_id: String,
+        files: Vec<TransferFileView>,
+        total_bytes: u64,
+    },
     TransferProgress {
         id: Uuid,
         outgoing: bool,
@@ -80,9 +147,21 @@ pub enum Event {
         eta_s: Option<u64>,
         current_file: Option<String>,
     },
-    TransferFileDone { id: Uuid, index: u32, path: Option<String>, outcome: &'static str },
-    TransferFinished { id: Uuid, outgoing: bool, state: TransferState, error: Option<String> },
-    Error { message: String },
+    TransferFileDone {
+        id: Uuid,
+        index: u32,
+        path: Option<String>,
+        outcome: &'static str,
+    },
+    TransferFinished {
+        id: Uuid,
+        outgoing: bool,
+        state: TransferState,
+        error: Option<String>,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// Récepteur des événements (implémenté par la couche d'application).

@@ -55,7 +55,10 @@ pub struct DevicesView {
 #[tauri::command]
 fn devices(s: State<AppState>) -> R<DevicesView> {
     let node = s.node.lock().unwrap();
-    Ok(DevicesView { devices: node.devices().map_err(e)?, connected: node.connected_peers() })
+    Ok(DevicesView {
+        devices: node.devices().map_err(e)?,
+        connected: node.connected_peers(),
+    })
 }
 
 #[derive(Serialize)]
@@ -82,8 +85,16 @@ fn open_pairing(s: State<AppState>) -> R<PairingView> {
                 .build()
         })
     });
-    let address = ip.zip(node.listen_addr()).map(|(ip, a)| format!("{ip}:{}", a.port()));
-    Ok(PairingView { code: info.code, expires_in_s: info.expires_in_s, qr_svg, fingerprint: info.fingerprint, address })
+    let address = ip
+        .zip(node.listen_addr())
+        .map(|(ip, a)| format!("{ip}:{}", a.port()));
+    Ok(PairingView {
+        code: info.code,
+        expires_in_s: info.expires_in_s,
+        qr_svg,
+        fingerprint: info.fingerprint,
+        address,
+    })
 }
 
 #[tauri::command]
@@ -93,17 +104,29 @@ fn close_pairing(s: State<AppState>) {
 
 #[tauri::command]
 fn confirm_pairing(s: State<AppState>, peer_id: String, accept: bool) -> R<()> {
-    s.node.lock().unwrap().confirm_pairing(&peer_id, accept).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .confirm_pairing(&peer_id, accept)
+        .map_err(e)
 }
 
 #[tauri::command]
 fn rename_device(s: State<AppState>, peer_id: String, name: Option<String>) -> R<()> {
-    s.node.lock().unwrap().rename_device(&peer_id, name.as_deref()).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .rename_device(&peer_id, name.as_deref())
+        .map_err(e)
 }
 
 #[tauri::command]
 fn set_auto_accept(s: State<AppState>, peer_id: String, on: bool) -> R<()> {
-    s.node.lock().unwrap().set_auto_accept(&peer_id, on).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .set_auto_accept(&peer_id, on)
+        .map_err(e)
 }
 
 #[tauri::command]
@@ -114,7 +137,12 @@ fn remove_device(s: State<AppState>, peer_id: String) -> R<()> {
 #[tauri::command]
 fn send_paths(s: State<AppState>, peer_id: String, paths: Vec<String>) -> R<String> {
     let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-    s.node.lock().unwrap().send_paths(&peer_id, paths).map(|id| id.to_string()).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .send_paths(&peer_id, paths)
+        .map(|id| id.to_string())
+        .map_err(e)
 }
 
 #[tauri::command]
@@ -123,29 +151,60 @@ fn send_text(s: State<AppState>, peer_id: String, content: String) -> R<()> {
     if trimmed.is_empty() {
         return Err("Texte vide".into());
     }
-    let is_link = !trimmed.contains(char::is_whitespace) && (trimmed.starts_with("http://") || trimmed.starts_with("https://"));
-    let kind = if is_link { ShareKind::Link } else { ShareKind::Text };
-    s.node.lock().unwrap().send(&peer_id, Message::Share { kind, content: trimmed.into() }).map_err(e)
+    let is_link = !trimmed.contains(char::is_whitespace)
+        && (trimmed.starts_with("http://") || trimmed.starts_with("https://"));
+    let kind = if is_link {
+        ShareKind::Link
+    } else {
+        ShareKind::Text
+    };
+    s.node
+        .lock()
+        .unwrap()
+        .send(
+            &peer_id,
+            Message::Share {
+                kind,
+                content: trimmed.into(),
+            },
+        )
+        .map_err(e)
 }
 
 #[tauri::command]
 fn accept_transfer(s: State<AppState>, id: String, accept: bool) -> R<()> {
-    s.node.lock().unwrap().accept_transfer(&uuid(&id)?, accept).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .accept_transfer(&uuid(&id)?, accept)
+        .map_err(e)
 }
 
 #[tauri::command]
 fn pause_transfer(s: State<AppState>, id: String) -> R<()> {
-    s.node.lock().unwrap().pause_transfer(&uuid(&id)?).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .pause_transfer(&uuid(&id)?)
+        .map_err(e)
 }
 
 #[tauri::command]
 fn resume_transfer(s: State<AppState>, id: String) -> R<()> {
-    s.node.lock().unwrap().resume_transfer(&uuid(&id)?).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .resume_transfer(&uuid(&id)?)
+        .map_err(e)
 }
 
 #[tauri::command]
 fn cancel_transfer(s: State<AppState>, id: String) -> R<()> {
-    s.node.lock().unwrap().cancel_transfer(&uuid(&id)?).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .cancel_transfer(&uuid(&id)?)
+        .map_err(e)
 }
 
 #[tauri::command]
@@ -170,28 +229,66 @@ fn clear_notifications(s: State<AppState>) -> R<usize> {
 
 #[tauri::command]
 fn notification_apps(s: State<AppState>, peer_id: String) -> R<Vec<nc_core::protocol::AppEntry>> {
-    s.node.lock().unwrap().notification_apps(&peer_id).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .notification_apps(&peer_id)
+        .map_err(e)
 }
 
 #[tauri::command]
-fn set_notification_app(s: State<AppState>, peer_id: String, package: String, enabled: bool) -> R<()> {
-    s.node.lock().unwrap().set_notification_app(&peer_id, &package, enabled).map_err(e)
+fn set_notification_app(
+    s: State<AppState>,
+    peer_id: String,
+    package: String,
+    enabled: bool,
+) -> R<()> {
+    s.node
+        .lock()
+        .unwrap()
+        .set_notification_app(&peer_id, &package, enabled)
+        .map_err(e)
 }
 
 #[tauri::command]
-fn notification_action(s: State<AppState>, peer_id: String, key: String, action_index: u32, reply: Option<String>) -> R<()> {
+fn notification_action(
+    s: State<AppState>,
+    peer_id: String,
+    key: String,
+    action_index: u32,
+    reply: Option<String>,
+) -> R<()> {
     let reply = reply.filter(|r| !r.trim().is_empty());
-    s.node.lock().unwrap().send(&peer_id, Message::NotificationAction { key, action_index, reply }).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .send(
+            &peer_id,
+            Message::NotificationAction {
+                key,
+                action_index,
+                reply,
+            },
+        )
+        .map_err(e)
 }
 
 #[tauri::command]
 fn notification_dismiss(s: State<AppState>, peer_id: String, key: String) -> R<()> {
-    s.node.lock().unwrap().send(&peer_id, Message::NotificationDismiss { key }).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .send(&peer_id, Message::NotificationDismiss { key })
+        .map_err(e)
 }
 
 #[tauri::command]
 fn notification_open(s: State<AppState>, peer_id: String, key: String) -> R<()> {
-    s.node.lock().unwrap().send(&peer_id, Message::NotificationOpen { key }).map_err(e)
+    s.node
+        .lock()
+        .unwrap()
+        .send(&peer_id, Message::NotificationOpen { key })
+        .map_err(e)
 }
 
 #[tauri::command]
@@ -200,8 +297,17 @@ fn remote_command(s: State<AppState>, peer_id: String, command: RemoteCommand) -
 }
 
 #[tauri::command]
-fn media_command(s: State<AppState>, peer_id: String, session_id: String, action: MediaAction) -> R<()> {
-    s.node.lock().unwrap().send(&peer_id, Message::MediaCommand { session_id, action }).map_err(e)
+fn media_command(
+    s: State<AppState>,
+    peer_id: String,
+    session_id: String,
+    action: MediaAction,
+) -> R<()> {
+    s.node
+        .lock()
+        .unwrap()
+        .send(&peer_id, Message::MediaCommand { session_id, action })
+        .map_err(e)
 }
 
 #[tauri::command]
@@ -211,7 +317,11 @@ fn get_settings(s: State<AppState>) -> Settings {
 
 #[tauri::command]
 fn set_settings(s: State<AppState>, settings: Settings) -> R<()> {
-    s.node.lock().unwrap().set_settings(settings.clone()).map_err(e)?;
+    s.node
+        .lock()
+        .unwrap()
+        .set_settings(settings.clone())
+        .map_err(e)?;
     *s.settings.write().unwrap() = settings;
     Ok(())
 }
@@ -223,7 +333,11 @@ fn snapshot(s: State<AppState>) -> crate::sink::Snapshot {
 
 #[tauri::command]
 fn default_download_dir() -> String {
-    dirs::download_dir().unwrap_or_default().join("NOTHING CONNECT").to_string_lossy().into_owned()
+    dirs::download_dir()
+        .unwrap_or_default()
+        .join("NOTHING CONNECT")
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Efface appareils, historique, préférences et identité, puis redémarre l'application.

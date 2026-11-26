@@ -38,9 +38,16 @@ fn main() {
             os_version: Some("15".into()),
             app_version: "0.1.0".into(),
             capabilities: vec![
-                Capability::FileTransfer, Capability::ShareText, Capability::DeviceStatus, Capability::Notifications,
-                Capability::NotificationActions, Capability::MediaControl, Capability::Ring, Capability::Vibrate,
-                Capability::MediaVolume, Capability::DoNotDisturb,
+                Capability::FileTransfer,
+                Capability::ShareText,
+                Capability::DeviceStatus,
+                Capability::Notifications,
+                Capability::NotificationActions,
+                Capability::MediaControl,
+                Capability::Ring,
+                Capability::Vibrate,
+                Capability::MediaVolume,
+                Capability::DoNotDisturb,
             ],
         },
         listen_port: 0,
@@ -72,7 +79,14 @@ fn main() {
                             RemoteCommand::SetDoNotDisturb { enabled } => dnd = enabled,
                             _ => {}
                         }
-                        let _ = node.send(&peer_id, Message::CommandResult { id, ok: true, error: None });
+                        let _ = node.send(
+                            &peer_id,
+                            Message::CommandResult {
+                                id,
+                                ok: true,
+                                error: None,
+                            },
+                        );
                         send_all(&node, &peer_id, volume, dnd);
                     }
                     Message::NotificationDismiss { key } => {
@@ -96,42 +110,109 @@ fn main() {
 }
 
 fn send_all(node: &Node, peer: &str, volume: u8, dnd: bool) {
-    let _ = node.send(peer, Message::Status(DeviceStatus {
-        battery_percent: Some(78),
-        charging: Some(true),
-        battery_temp_c: Some(31.4),
-        storage_free_bytes: Some(87_400_000_000),
-        storage_total_bytes: Some(256_000_000_000),
-        wifi_connected: Some(true),
-        wifi_ssid: Some("Maison".into()),
-        bluetooth_enabled: Some(true),
-        mobile_network: Some("Free 5G".into()),
-        media_volume_percent: Some(volume),
-        dnd_enabled: Some(dnd),
-    }));
-    let _ = node.send(peer, Message::NotificationApps { apps: vec![
-        AppEntry { package: "com.whatsapp".into(), app_name: "WhatsApp".into(), enabled: true },
-        AppEntry { package: "com.discord".into(), app_name: "Discord".into(), enabled: true },
-        AppEntry { package: "com.instagram.android".into(), app_name: "Instagram".into(), enabled: false },
-        AppEntry { package: "com.google.android.gm".into(), app_name: "Gmail".into(), enabled: true },
-    ]});
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
-    let _ = node.send(peer, Message::NotificationPosted(PhoneNotification {
-        key: "0|com.whatsapp|1".into(), package: "com.whatsapp".into(), app_name: "WhatsApp".into(),
-        title: Some("Léa".into()), text: Some("On se retrouve à 19 h devant le cinéma ?".into()), posted_at: now - 60_000,
-        icon_png_b64: None,
-        actions: vec![NotificationActionInfo { index: 0, title: "Répondre".into(), accepts_text: true }, NotificationActionInfo { index: 1, title: "Marquer comme lu".into(), accepts_text: false }],
-        sensitive: false,
-    }));
-    let _ = node.send(peer, Message::NotificationPosted(PhoneNotification {
-        key: "0|com.google.android.gm|7".into(), package: "com.google.android.gm".into(), app_name: "Gmail".into(),
-        title: Some("Votre colis arrive demain".into()), text: Some("Livraison prévue entre 9 h et 13 h.".into()), posted_at: now - 600_000,
-        icon_png_b64: None, actions: vec![], sensitive: false,
-    }));
-    let _ = node.send(peer, Message::MediaSessions { sessions: vec![MediaSessionInfo {
-        id: "spotify".into(), package: "com.spotify.music".into(), app_name: "Spotify".into(),
-        title: Some("Morceau de démonstration".into()), artist: Some("Artiste".into()), album: Some("Album".into()),
-        duration_ms: Some(214_000), position_ms: Some(81_000), state: PlaybackState::Playing, artwork_jpeg_b64: None,
-        can_skip_next: true, can_skip_prev: true,
-    }]});
+    let _ = node.send(
+        peer,
+        Message::Status(DeviceStatus {
+            battery_percent: Some(78),
+            charging: Some(true),
+            battery_temp_c: Some(31.4),
+            storage_free_bytes: Some(87_400_000_000),
+            storage_total_bytes: Some(256_000_000_000),
+            wifi_connected: Some(true),
+            wifi_ssid: Some("Maison".into()),
+            bluetooth_enabled: Some(true),
+            mobile_network: Some("Free 5G".into()),
+            media_volume_percent: Some(volume),
+            dnd_enabled: Some(dnd),
+        }),
+    );
+    let _ = node.send(
+        peer,
+        Message::NotificationApps {
+            apps: vec![
+                AppEntry {
+                    package: "com.whatsapp".into(),
+                    app_name: "WhatsApp".into(),
+                    enabled: true,
+                },
+                AppEntry {
+                    package: "com.discord".into(),
+                    app_name: "Discord".into(),
+                    enabled: true,
+                },
+                AppEntry {
+                    package: "com.instagram.android".into(),
+                    app_name: "Instagram".into(),
+                    enabled: false,
+                },
+                AppEntry {
+                    package: "com.google.android.gm".into(),
+                    app_name: "Gmail".into(),
+                    enabled: true,
+                },
+            ],
+        },
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let _ = node.send(
+        peer,
+        Message::NotificationPosted(PhoneNotification {
+            key: "0|com.whatsapp|1".into(),
+            package: "com.whatsapp".into(),
+            app_name: "WhatsApp".into(),
+            title: Some("Léa".into()),
+            text: Some("On se retrouve à 19 h devant le cinéma ?".into()),
+            posted_at: now - 60_000,
+            icon_png_b64: None,
+            actions: vec![
+                NotificationActionInfo {
+                    index: 0,
+                    title: "Répondre".into(),
+                    accepts_text: true,
+                },
+                NotificationActionInfo {
+                    index: 1,
+                    title: "Marquer comme lu".into(),
+                    accepts_text: false,
+                },
+            ],
+            sensitive: false,
+        }),
+    );
+    let _ = node.send(
+        peer,
+        Message::NotificationPosted(PhoneNotification {
+            key: "0|com.google.android.gm|7".into(),
+            package: "com.google.android.gm".into(),
+            app_name: "Gmail".into(),
+            title: Some("Votre colis arrive demain".into()),
+            text: Some("Livraison prévue entre 9 h et 13 h.".into()),
+            posted_at: now - 600_000,
+            icon_png_b64: None,
+            actions: vec![],
+            sensitive: false,
+        }),
+    );
+    let _ = node.send(
+        peer,
+        Message::MediaSessions {
+            sessions: vec![MediaSessionInfo {
+                id: "spotify".into(),
+                package: "com.spotify.music".into(),
+                app_name: "Spotify".into(),
+                title: Some("Morceau de démonstration".into()),
+                artist: Some("Artiste".into()),
+                album: Some("Album".into()),
+                duration_ms: Some(214_000),
+                position_ms: Some(81_000),
+                state: PlaybackState::Playing,
+                artwork_jpeg_b64: None,
+                can_skip_next: true,
+                can_skip_prev: true,
+            }],
+        },
+    );
 }

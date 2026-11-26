@@ -11,7 +11,12 @@ pub(crate) struct SpeedMeter {
 
 impl SpeedMeter {
     pub fn new(bytes: u64) -> Self {
-        Self { last_t: Instant::now(), last_bytes: bytes, bps: 0.0, last_emit: None }
+        Self {
+            last_t: Instant::now(),
+            last_bytes: bytes,
+            bps: 0.0,
+            last_emit: None,
+        }
     }
 
     pub fn reset(&mut self, bytes: u64) {
@@ -25,7 +30,11 @@ impl SpeedMeter {
         let dt = now.duration_since(self.last_t).as_secs_f64();
         if dt >= 0.25 {
             let inst = bytes.saturating_sub(self.last_bytes) as f64 / dt;
-            self.bps = if self.bps == 0.0 { inst } else { 0.7 * self.bps + 0.3 * inst };
+            self.bps = if self.bps == 0.0 {
+                inst
+            } else {
+                0.7 * self.bps + 0.3 * inst
+            };
             self.last_t = now;
             self.last_bytes = bytes;
         }

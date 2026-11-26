@@ -2922,6 +2922,7 @@ dependencies = [
  "android_logger",
  "log",
  "nc-core",
+ "nc-transport",
  "serde_json",
  "thiserror 2.0.21",
  "uniffi",

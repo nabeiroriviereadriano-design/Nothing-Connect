@@ -59,7 +59,11 @@ impl SecretStore for Vault {
         Ok(self.0.get(name.into()))
     }
     fn set(&self, name: &str, value: &[u8]) -> Result<(), nc_core::SecurityError> {
-        if self.0.set(name.into(), value.to_vec()) { Ok(()) } else { Err(nc_core::SecurityError::Store("Keystore".into())) }
+        if self.0.set(name.into(), value.to_vec()) {
+            Ok(())
+        } else {
+            Err(nc_core::SecurityError::Store("Keystore".into()))
+        }
     }
     fn delete(&self, name: &str) -> Result<(), nc_core::SecurityError> {
         self.0.delete(name.into());
@@ -72,6 +76,32 @@ pub struct NamedInput {
     /// Chemin réel ou `/proc/self/fd/N` pour un `content://` ouvert par Kotlin.
     pub path: String,
     pub name: Option<String>,
+}
+
+/// PC annoncés sur le réseau local (mDNS), pour l'écran d'association.
+#[derive(uniffi::Record)]
+pub struct DiscoveredPc {
+    pub name: String,
+    pub fingerprint: String,
+    pub protocol: u16,
+    /// Adresses `ip:port`.
+    pub addrs: Vec<String>,
+}
+
+/// Recherche bloquante (`wait_ms`), à appeler hors du thread principal.
+/// Android : un `WifiManager.MulticastLock` doit être tenu pendant l'appel.
+#[uniffi::export]
+pub fn discover_pcs(wait_ms: u32) -> Vec<DiscoveredPc> {
+    nc_transport::discovery::browse(std::time::Duration::from_millis(wait_ms as u64))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|d| DiscoveredPc {
+            name: d.name,
+            fingerprint: d.fingerprint,
+            protocol: d.protocol,
+            addrs: d.addrs.iter().map(|a| a.to_string()).collect(),
+        })
+        .collect()
 }
 
 #[derive(uniffi::Object)]
@@ -88,9 +118,19 @@ fn uuid(s: &str) -> R<uuid::Uuid> {
 impl NcNode {
     /// `device_json` : [`DeviceInfo`] sérialisé.
     #[uniffi::constructor]
-    pub fn new(data_dir: String, download_dir: String, device_json: String, vault: Arc<dyn SecretVault>, listener: Arc<dyn EventListener>) -> R<Arc<Self>> {
+    pub fn new(
+        data_dir: String,
+        download_dir: String,
+        device_json: String,
+        vault: Arc<dyn SecretVault>,
+        listener: Arc<dyn EventListener>,
+    ) -> R<Arc<Self>> {
         #[cfg(target_os = "android")]
-        android_logger::init_once(android_logger::Config::default().with_tag("nc-core").with_max_level(log::LevelFilter::Info));
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_tag("nc-core")
+                .with_max_level(log::LevelFilter::Info),
+        );
         let device: DeviceInfo = serde_json::from_str(&device_json)?;
         let cfg = NodeConfig {
             role: Role::Phone,
@@ -102,7 +142,10 @@ impl NcNode {
         };
         let vault = Vault(vault);
         let node = Node::new(cfg, &vault, Arc::new(Sink(listener)))?;
-        Ok(Arc::new(Self { node: Mutex::new(node), vault }))
+        Ok(Arc::new(Self {
+            node: Mutex::new(node),
+            vault,
+        }))
     }
 
     pub fn start(&self) -> R<()> {
@@ -117,20 +160,33 @@ impl NcNode {
     pub fn protocol_version(&self) -> u16 {
         nc_core::protocol::PROTOCOL_VERSION
     }
-    pub fn pair_with(&self, addr: String, code: String) -> R<()> {
-        Ok(self.node.lock().unwrap().pair_with(&addr, &code, None)?)
+    /// `pc_fingerprint` : empreinte annoncée en mDNS, vérifiée après le handshake.
+    pub fn pair_with(&self, addr: String, code: String, pc_fingerprint: Option<String>) -> R<()> {
+        Ok(self
+            .node
+            .lock()
+            .unwrap()
+            .pair_with(&addr, &code, pc_fingerprint.as_deref())?)
     }
     pub fn pair_with_qr(&self, uri: String) -> R<()> {
         Ok(self.node.lock().unwrap().pair_with_qr(&uri)?)
     }
     pub fn devices_json(&self) -> R<String> {
-        Ok(serde_json::to_string(&self.node.lock().unwrap().devices()?)?)
+        Ok(serde_json::to_string(
+            &self.node.lock().unwrap().devices()?,
+        )?)
     }
     pub fn connected_json(&self) -> R<String> {
-        Ok(serde_json::to_string(&self.node.lock().unwrap().connected_peers())?)
+        Ok(serde_json::to_string(
+            &self.node.lock().unwrap().connected_peers(),
+        )?)
     }
     pub fn rename_device(&self, peer_id: String, name: Option<String>) -> R<()> {
-        Ok(self.node.lock().unwrap().rename_device(&peer_id, name.as_deref())?)
+        Ok(self
+            .node
+            .lock()
+            .unwrap()
+            .rename_device(&peer_id, name.as_deref())?)
     }
     pub fn set_auto_accept(&self, peer_id: String, on: bool) -> R<()> {
         Ok(self.node.lock().unwrap().set_auto_accept(&peer_id, on)?)
@@ -151,11 +207,23 @@ impl NcNode {
         Ok(self.node.lock().unwrap().broadcast(msg) as u32)
     }
     pub fn send_files(&self, peer_id: String, inputs: Vec<NamedInput>) -> R<String> {
-        let v = inputs.into_iter().map(|i| (PathBuf::from(i.path), i.name)).collect();
-        Ok(self.node.lock().unwrap().send_named(&peer_id, v)?.to_string())
+        let v = inputs
+            .into_iter()
+            .map(|i| (PathBuf::from(i.path), i.name))
+            .collect();
+        Ok(self
+            .node
+            .lock()
+            .unwrap()
+            .send_named(&peer_id, v)?
+            .to_string())
     }
     pub fn accept_transfer(&self, id: String, accept: bool) -> R<()> {
-        Ok(self.node.lock().unwrap().accept_transfer(&uuid(&id)?, accept)?)
+        Ok(self
+            .node
+            .lock()
+            .unwrap()
+            .accept_transfer(&uuid(&id)?, accept)?)
     }
     pub fn pause_transfer(&self, id: String) -> R<()> {
         Ok(self.node.lock().unwrap().pause_transfer(&uuid(&id)?)?)
@@ -167,13 +235,17 @@ impl NcNode {
         Ok(self.node.lock().unwrap().cancel_transfer(&uuid(&id)?)?)
     }
     pub fn transfers_json(&self, limit: u32) -> R<String> {
-        Ok(serde_json::to_string(&self.node.lock().unwrap().transfers(limit)?)?)
+        Ok(serde_json::to_string(
+            &self.node.lock().unwrap().transfers(limit)?,
+        )?)
     }
     pub fn clear_transfer_history(&self) -> R<u32> {
         Ok(self.node.lock().unwrap().clear_transfer_history()? as u32)
     }
     pub fn settings_json(&self) -> R<String> {
-        Ok(serde_json::to_string(&self.node.lock().unwrap().settings())?)
+        Ok(serde_json::to_string(
+            &self.node.lock().unwrap().settings(),
+        )?)
     }
     pub fn set_settings_json(&self, json: String) -> R<()> {
         let s: Settings = serde_json::from_str(&json)?;

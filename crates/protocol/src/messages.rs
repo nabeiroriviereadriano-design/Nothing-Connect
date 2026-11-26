@@ -189,9 +189,16 @@ pub enum RejectReason {
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum Message {
     /// Premier message de chaque session, dans les deux sens.
-    Hello { protocol: u16, device: DeviceInfo },
-    Ping { nonce: u64 },
-    Pong { nonce: u64 },
+    Hello {
+        protocol: u16,
+        device: DeviceInfo,
+    },
+    Ping {
+        nonce: u64,
+    },
+    Pong {
+        nonce: u64,
+    },
     /// Fin propre de session.
     Bye,
     /// L'expéditeur a révoqué l'association : le destinataire supprime aussi l'appareil.
@@ -204,43 +211,99 @@ pub enum Message {
 
     // --- état et commandes ---
     Status(DeviceStatus),
-    Command { id: u64, command: RemoteCommand },
-    CommandResult { id: u64, ok: bool, #[serde(default)] error: Option<String> },
+    Command {
+        id: u64,
+        command: RemoteCommand,
+    },
+    CommandResult {
+        id: u64,
+        ok: bool,
+        #[serde(default)]
+        error: Option<String>,
+    },
 
     // --- notifications ---
     NotificationPosted(PhoneNotification),
-    NotificationRemoved { key: String },
+    NotificationRemoved {
+        key: String,
+    },
     /// PC → téléphone : déclencher une action (réponse rapide si `reply` présent).
-    NotificationAction { key: String, action_index: u32, #[serde(default)] reply: Option<String> },
+    NotificationAction {
+        key: String,
+        action_index: u32,
+        #[serde(default)]
+        reply: Option<String>,
+    },
     /// PC → téléphone : ignorer / supprimer la notification sur le téléphone.
-    NotificationDismiss { key: String },
+    NotificationDismiss {
+        key: String,
+    },
     /// PC → téléphone : ouvrir l'application associée sur le téléphone.
-    NotificationOpen { key: String },
+    NotificationOpen {
+        key: String,
+    },
     /// Téléphone → PC : liste des applis vues par le service de notification.
-    NotificationApps { apps: Vec<AppEntry> },
+    NotificationApps {
+        apps: Vec<AppEntry>,
+    },
     /// PC → téléphone : filtre par application, appliqué **sur le téléphone** avant envoi.
-    NotificationFilter { package: String, enabled: bool },
+    NotificationFilter {
+        package: String,
+        enabled: bool,
+    },
 
     // --- multimédia ---
-    MediaSessions { sessions: Vec<MediaSessionInfo> },
-    MediaCommand { session_id: String, action: MediaAction },
+    MediaSessions {
+        sessions: Vec<MediaSessionInfo>,
+    },
+    MediaCommand {
+        session_id: String,
+        action: MediaAction,
+    },
 
     // --- partage rapide ---
-    Share { kind: ShareKind, content: String },
+    Share {
+        kind: ShareKind,
+        content: String,
+    },
 
     // --- transferts ---
-    TransferOffer { id: Uuid, files: Vec<OfferedFile> },
+    TransferOffer {
+        id: Uuid,
+        files: Vec<OfferedFile>,
+    },
     /// Le récepteur accepte et indique, par fichier, l'offset déjà reçu (reprise).
-    TransferAccept { id: Uuid, offsets: Vec<u64> },
-    TransferReject { id: Uuid, reason: RejectReason },
+    TransferAccept {
+        id: Uuid,
+        offsets: Vec<u64>,
+    },
+    TransferReject {
+        id: Uuid,
+        reason: RejectReason,
+    },
     /// Fin d'un fichier côté émetteur, avec l'empreinte SHA-256 (hex) du fichier entier.
-    TransferFileEnd { id: Uuid, file_index: u32, sha256: String },
+    TransferFileEnd {
+        id: Uuid,
+        file_index: u32,
+        sha256: String,
+    },
     /// Le récepteur confirme l'intégrité d'un fichier.
-    TransferFileVerified { id: Uuid, file_index: u32, ok: bool },
-    TransferPause { id: Uuid },
+    TransferFileVerified {
+        id: Uuid,
+        file_index: u32,
+        ok: bool,
+    },
+    TransferPause {
+        id: Uuid,
+    },
     /// Le récepteur relance l'envoi à partir des offsets indiqués.
-    TransferResume { id: Uuid, offsets: Vec<u64> },
-    TransferCancel { id: Uuid },
+    TransferResume {
+        id: Uuid,
+        offsets: Vec<u64>,
+    },
+    TransferCancel {
+        id: Uuid,
+    },
 }
 
 #[cfg(test)]
@@ -255,14 +318,28 @@ mod tests {
 
     #[test]
     fn tagged_json_shape() {
-        let m = Message::Command { id: 1, command: RemoteCommand::Vibrate { millis: 300 } };
+        let m = Message::Command {
+            id: 1,
+            command: RemoteCommand::Vibrate { millis: 300 },
+        };
         let s = serde_json::to_string(&m).unwrap();
-        assert_eq!(s, r#"{"t":"command","id":1,"command":{"c":"vibrate","millis":300}}"#);
+        assert_eq!(
+            s,
+            r#"{"t":"command","id":1,"command":{"c":"vibrate","millis":300}}"#
+        );
     }
 
     #[test]
     fn optional_fields_default() {
-        let m: Message = serde_json::from_str(r#"{"t":"command_result","id":3,"ok":true}"#).unwrap();
-        assert_eq!(m, Message::CommandResult { id: 3, ok: true, error: None });
+        let m: Message =
+            serde_json::from_str(r#"{"t":"command_result","id":3,"ok":true}"#).unwrap();
+        assert_eq!(
+            m,
+            Message::CommandResult {
+                id: 3,
+                ok: true,
+                error: None
+            }
+        );
     }
 }

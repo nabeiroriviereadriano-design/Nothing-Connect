@@ -35,7 +35,9 @@ pub enum TransportError {
     Timeout,
     #[error("connexion fermée par le pair")]
     Closed,
-    #[error("association refusée : code incorrect, expiré, ou aucune association ouverte sur le PC")]
+    #[error(
+        "association refusée : code incorrect, expiré, ou aucune association ouverte sur le PC"
+    )]
     PairingFailed,
     #[error("découverte : {0}")]
     Discovery(String),

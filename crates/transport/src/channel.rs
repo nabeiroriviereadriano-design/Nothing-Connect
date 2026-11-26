@@ -58,11 +58,15 @@ impl<R: AsyncRead + Unpin> SecureReader<R> {
     pub async fn read_raw(&mut self) -> Result<&[u8], TransportError> {
         let len = match self.inner.read_u16().await {
             Ok(n) => n as usize,
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Err(TransportError::Closed),
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                return Err(TransportError::Closed)
+            }
             Err(e) => return Err(e.into()),
         };
         self.inner.read_exact(&mut self.cipher[..len]).await?;
-        let n = self.state.read_message(self.nonce, &self.cipher[..len], &mut self.plain)?;
+        let n = self
+            .state
+            .read_message(self.nonce, &self.cipher[..len], &mut self.plain)?;
         self.nonce += 1;
         Ok(&self.plain[..n])
     }
@@ -80,7 +84,9 @@ impl<R: AsyncRead + Unpin> SecureReader<R> {
 impl<W: AsyncWrite + Unpin> SecureWriter<W> {
     /// Chiffre et met en tampon un texte clair (sans vider le tampon réseau).
     pub async fn write_raw(&mut self, plain: &[u8]) -> Result<(), TransportError> {
-        let n = self.state.write_message(self.nonce, plain, &mut self.cipher)?;
+        let n = self
+            .state
+            .write_message(self.nonce, plain, &mut self.cipher)?;
         self.nonce += 1;
         self.inner.write_u16(n as u16).await?;
         self.inner.write_all(&self.cipher[..n]).await?;
@@ -133,21 +139,31 @@ impl<W: AsyncWrite + Unpin> SecureWriter<W> {
 
 // ---- E/S en clair utilisées pendant les handshakes ----
 
-pub(crate) async fn write_plain_msg<W: AsyncWrite + Unpin>(w: &mut W, b: &[u8]) -> Result<(), TransportError> {
+pub(crate) async fn write_plain_msg<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    b: &[u8],
+) -> Result<(), TransportError> {
     w.write_u16(b.len() as u16).await?;
     w.write_all(b).await?;
     w.flush().await?;
     Ok(())
 }
 
-pub(crate) async fn read_plain_msg<R: AsyncRead + Unpin>(r: &mut R, buf: &mut [u8]) -> Result<usize, TransportError> {
+pub(crate) async fn read_plain_msg<R: AsyncRead + Unpin>(
+    r: &mut R,
+    buf: &mut [u8],
+) -> Result<usize, TransportError> {
     let len = match r.read_u16().await {
         Ok(n) => n as usize,
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Err(TransportError::Closed),
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+            return Err(TransportError::Closed)
+        }
         Err(e) => return Err(e.into()),
     };
     if len > buf.len() {
-        return Err(TransportError::Protocol(nc_protocol::ProtocolError::TooLarge(len)));
+        return Err(TransportError::Protocol(
+            nc_protocol::ProtocolError::TooLarge(len),
+        ));
     }
     r.read_exact(&mut buf[..len]).await?;
     Ok(len)

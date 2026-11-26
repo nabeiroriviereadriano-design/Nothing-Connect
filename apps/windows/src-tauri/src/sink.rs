@@ -25,8 +25,16 @@ pub struct TauriSink {
 }
 
 impl TauriSink {
-    pub fn new(app: AppHandle, settings: Arc<RwLock<Settings>>, snapshot: Arc<Mutex<Snapshot>>) -> Self {
-        Self { app, settings, snapshot }
+    pub fn new(
+        app: AppHandle,
+        settings: Arc<RwLock<Settings>>,
+        snapshot: Arc<Mutex<Snapshot>>,
+    ) -> Self {
+        Self {
+            app,
+            settings,
+            snapshot,
+        }
     }
 
     fn remember(&self, e: &Event) {
@@ -70,7 +78,9 @@ impl EventSink for TauriSink {
         self.remember(&e);
         let s = self.settings.read().unwrap().clone();
         match &e {
-            Event::Notification { notification: n, .. } if s.notifications_enabled && s.notification_popups => {
+            Event::Notification {
+                notification: n, ..
+            } if s.notifications_enabled && s.notification_popups => {
                 let title = match &n.title {
                     Some(t) => format!("{} — {}", n.app_name, t),
                     None => n.app_name.clone(),
@@ -78,19 +88,33 @@ impl EventSink for TauriSink {
                 self.toast(&title, n.text.as_deref());
             }
             Event::TransferIncoming { files, .. } => {
-                let body = if files.len() == 1 { files[0].rel_path.clone() } else { format!("{} fichiers", files.len()) };
-                self.toast("Fichiers entrants — ouvrez NOTHING CONNECT pour accepter", Some(&body));
+                let body = if files.len() == 1 {
+                    files[0].rel_path.clone()
+                } else {
+                    format!("{} fichiers", files.len())
+                };
+                self.toast(
+                    "Fichiers entrants — ouvrez NOTHING CONNECT pour accepter",
+                    Some(&body),
+                );
                 crate::tray::show_main(&self.app);
             }
             Event::PairingRequest { device, .. } => {
                 self.toast("Demande d'association", Some(&device.name));
                 crate::tray::show_main(&self.app);
             }
-            Event::TransferFinished { outgoing: false, state: TransferState::Completed, .. } => {
+            Event::TransferFinished {
+                outgoing: false,
+                state: TransferState::Completed,
+                ..
+            } => {
                 self.toast("Réception terminée", None);
             }
             Event::Share { content, .. } => {
-                self.toast("Partage reçu du téléphone", Some(&content.chars().take(120).collect::<String>()));
+                self.toast(
+                    "Partage reçu du téléphone",
+                    Some(&content.chars().take(120).collect::<String>()),
+                );
             }
             _ => {}
         }

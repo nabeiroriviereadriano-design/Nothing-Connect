@@ -51,7 +51,10 @@ pub fn generate_code() -> String {
 
 /// Normalise une saisie utilisateur ("123 456", "123-456" → "123456").
 pub fn normalize_code(input: &str) -> Result<String, PairingError> {
-    let digits: String = input.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
+    let digits: String = input
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect();
     if digits.len() == CODE_DIGITS && digits.chars().all(|c| c.is_ascii_digit()) {
         Ok(digits)
     } else {
@@ -73,7 +76,12 @@ impl PairingWindow {
         Self::with_ttl(WINDOW_TTL)
     }
     pub fn with_ttl(ttl: Duration) -> Self {
-        Self { code: generate_code(), opened: Instant::now(), ttl, attempts: 0 }
+        Self {
+            code: generate_code(),
+            opened: Instant::now(),
+            ttl,
+            attempts: 0,
+        }
     }
     pub fn code(&self) -> &str {
         &self.code
@@ -123,10 +131,14 @@ impl Spake {
         if peer_msg.len() != SPAKE2_MSG_LEN {
             return Err(PairingError::BadMessage);
         }
-        let key = self.state.finish(peer_msg).map_err(|_| PairingError::BadMessage)?;
+        let key = self
+            .state
+            .finish(peer_msg)
+            .map_err(|_| PairingError::BadMessage)?;
         let hk = Hkdf::<Sha256>::new(Some(b"nothing-connect/pairing/v1"), &key);
         let mut psk = [0u8; 32];
-        hk.expand(b"noise-psk", &mut psk).expect("32 octets valides pour HKDF");
+        hk.expand(b"noise-psk", &mut psk)
+            .expect("32 octets valides pour HKDF");
         Ok(psk)
     }
 }
@@ -143,11 +155,16 @@ pub struct QrPayload {
 
 impl QrPayload {
     pub fn to_uri(&self) -> String {
-        format!("ncpair://{}:{}?c={}&f={}", self.host, self.port, self.code, self.pc_fingerprint)
+        format!(
+            "ncpair://{}:{}?c={}&f={}",
+            self.host, self.port, self.code, self.pc_fingerprint
+        )
     }
 
     pub fn parse(uri: &str) -> Result<Self, PairingError> {
-        let rest = uri.strip_prefix("ncpair://").ok_or(PairingError::BadFormat)?;
+        let rest = uri
+            .strip_prefix("ncpair://")
+            .ok_or(PairingError::BadFormat)?;
         let (hostport, query) = rest.split_once('?').ok_or(PairingError::BadFormat)?;
         let (host, port) = hostport.rsplit_once(':').ok_or(PairingError::BadFormat)?;
         let port: u16 = port.parse().map_err(|_| PairingError::BadFormat)?;
@@ -163,7 +180,10 @@ impl QrPayload {
             return Err(PairingError::BadFormat);
         }
         Ok(Self {
-            host: host.trim_start_matches('[').trim_end_matches(']').to_string(),
+            host: host
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_string(),
             port,
             code: code.ok_or(PairingError::BadFormat)?,
             pc_fingerprint: fp.ok_or(PairingError::BadFormat)?,
@@ -216,7 +236,12 @@ mod tests {
 
     #[test]
     fn qr_roundtrip() {
-        let q = QrPayload { host: "192.168.1.20".into(), port: 47820, code: "004217".into(), pc_fingerprint: "AB12-CD34-EF56-7890".into() };
+        let q = QrPayload {
+            host: "192.168.1.20".into(),
+            port: 47820,
+            code: "004217".into(),
+            pc_fingerprint: "AB12-CD34-EF56-7890".into(),
+        };
         assert_eq!(QrPayload::parse(&q.to_uri()).unwrap(), q);
         assert!(QrPayload::parse("http://x").is_err());
         assert!(QrPayload::parse("ncpair://h:1?c=12").is_err());

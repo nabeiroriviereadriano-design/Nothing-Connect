@@ -33,14 +33,25 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Ouvrir NOTHING CONNECT", true, None::<&str>)?;
     let send = MenuItem::with_id(app, "send", "Envoyer des fichiers…", true, None::<&str>)?;
     let suspended = app.state::<AppState>().settings.read().unwrap().suspended;
-    let pause = CheckMenuItem::with_id(app, "suspend", "Suspendre les connexions", true, suspended, None::<&str>)?;
+    let pause = CheckMenuItem::with_id(
+        app,
+        "suspend",
+        "Suspendre les connexions",
+        true,
+        suspended,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, "quit", "Quitter complètement", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open, &send, &pause, &sep, &quit])?;
     let pause_item = pause.clone();
 
     TrayIconBuilder::with_id("main")
-        .icon(app.default_window_icon().cloned().expect("icône de l'application"))
+        .icon(
+            app.default_window_icon()
+                .cloned()
+                .expect("icône de l'application"),
+        )
         .tooltip("NOTHING CONNECT")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -66,7 +77,12 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             _ => {}
         })
         .on_tray_icon_event(|tray, ev| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = ev
+            {
                 show_main(tray.app_handle());
             }
         })

@@ -66,7 +66,8 @@ pub struct WindowsCredentialStore {
 #[cfg(all(windows, feature = "os-keyring"))]
 impl SecretStore for WindowsCredentialStore {
     fn get(&self, name: &str) -> Result<Option<Vec<u8>>, SecurityError> {
-        let e = keyring::Entry::new(&self.service, name).map_err(|e| SecurityError::Store(e.to_string()))?;
+        let e = keyring::Entry::new(&self.service, name)
+            .map_err(|e| SecurityError::Store(e.to_string()))?;
         match e.get_secret() {
             Ok(v) => Ok(Some(v)),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -79,7 +80,8 @@ impl SecretStore for WindowsCredentialStore {
             .map_err(|e| SecurityError::Store(e.to_string()))
     }
     fn delete(&self, name: &str) -> Result<(), SecurityError> {
-        let e = keyring::Entry::new(&self.service, name).map_err(|e| SecurityError::Store(e.to_string()))?;
+        let e = keyring::Entry::new(&self.service, name)
+            .map_err(|e| SecurityError::Store(e.to_string()))?;
         match e.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(SecurityError::Store(e.to_string())),
@@ -106,8 +108,15 @@ impl Identity {
 
     pub fn generate() -> Result<Self, SecurityError> {
         let kp = snow::Builder::new(NOISE_PAIRED.parse()?).generate_keypair()?;
-        let public: [u8; 32] = kp.public.as_slice().try_into().map_err(|_| SecurityError::BadKey)?;
-        Ok(Self { private: Zeroizing::new(kp.private), public })
+        let public: [u8; 32] = kp
+            .public
+            .as_slice()
+            .try_into()
+            .map_err(|_| SecurityError::BadKey)?;
+        Ok(Self {
+            private: Zeroizing::new(kp.private),
+            public,
+        })
     }
 
     /// Reconstruit une identité depuis une clé privée (fournie par le coffre de la plateforme).
@@ -121,7 +130,10 @@ impl Identity {
         }
         // Recalcul via une session Noise locale : évite une dépendance x25519 supplémentaire.
         let public = derive_public(&sk)?;
-        Ok(Self { private: sk, public })
+        Ok(Self {
+            private: sk,
+            public,
+        })
     }
 
     /// Efface l'identité (réinitialisation complète : toutes les associations deviennent caduques).
@@ -150,7 +162,9 @@ fn derive_public(sk: &[u8]) -> Result<[u8; 32], SecurityError> {
         .local_private_key(sk)?
         .remote_public_key(&responder_kp.public)?
         .build_initiator()?;
-    let mut resp = snow::Builder::new(params).local_private_key(&responder_kp.private)?.build_responder()?;
+    let mut resp = snow::Builder::new(params)
+        .local_private_key(&responder_kp.private)?
+        .build_responder()?;
     let mut buf = [0u8; 256];
     let mut out = [0u8; 256];
     let n = init.write_message(&[], &mut buf)?;
@@ -163,7 +177,11 @@ fn derive_public(sk: &[u8]) -> Result<[u8; 32], SecurityError> {
 /// Empreinte lisible : 16 premiers caractères hex du SHA-256, par groupes de 4.
 pub fn fingerprint(public: &[u8]) -> String {
     let h = hex::encode_upper(&Sha256::digest(public)[..8]);
-    h.as_bytes().chunks(4).map(|c| std::str::from_utf8(c).unwrap()).collect::<Vec<_>>().join("-")
+    h.as_bytes()
+        .chunks(4)
+        .map(|c| std::str::from_utf8(c).unwrap())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 /// Comparaison en temps constant (évite les fuites par mesure de temps).

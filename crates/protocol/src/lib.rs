@@ -75,12 +75,24 @@ impl Preamble {
     pub const LEN: usize = 8;
 
     pub fn new(mode: SessionMode) -> Self {
-        Self { version: PROTOCOL_VERSION, mode }
+        Self {
+            version: PROTOCOL_VERSION,
+            mode,
+        }
     }
 
     pub fn encode(&self) -> [u8; Self::LEN] {
         let v = self.version.to_be_bytes();
-        [MAGIC[0], MAGIC[1], MAGIC[2], MAGIC[3], v[0], v[1], self.mode as u8, 0]
+        [
+            MAGIC[0],
+            MAGIC[1],
+            MAGIC[2],
+            MAGIC[3],
+            v[0],
+            v[1],
+            self.mode as u8,
+            0,
+        ]
     }
 
     pub fn decode(b: &[u8; Self::LEN]) -> Result<Self, ProtocolError> {
@@ -170,7 +182,12 @@ impl Frame {
                 let transfer = Uuid::from_slice(&b[1..17]).map_err(|_| ProtocolError::Truncated)?;
                 let file_index = u32::from_be_bytes(b[17..21].try_into().unwrap());
                 let offset = u64::from_be_bytes(b[21..29].try_into().unwrap());
-                Ok(Frame::Data(DataChunk { transfer, file_index, offset, data: b[DATA_HEADER..].to_vec() }))
+                Ok(Frame::Data(DataChunk {
+                    transfer,
+                    file_index,
+                    offset,
+                    data: b[DATA_HEADER..].to_vec(),
+                }))
             }
             k => Err(ProtocolError::UnknownKind(k)),
         }
@@ -234,16 +251,30 @@ mod tests {
     #[test]
     fn rejects_malformed() {
         assert!(matches!(Frame::decode(&[]), Err(ProtocolError::Empty)));
-        assert!(matches!(Frame::decode(&[9]), Err(ProtocolError::UnknownKind(9))));
-        assert!(matches!(Frame::decode(&[2, 1, 2]), Err(ProtocolError::Truncated)));
+        assert!(matches!(
+            Frame::decode(&[9]),
+            Err(ProtocolError::UnknownKind(9))
+        ));
+        assert!(matches!(
+            Frame::decode(&[2, 1, 2]),
+            Err(ProtocolError::Truncated)
+        ));
         assert!(Frame::decode(b"\x01{not json").is_err());
         let big = vec![1u8; MAX_FRAME_PLAINTEXT + 1];
-        assert!(matches!(Frame::decode(&big), Err(ProtocolError::TooLarge(_))));
+        assert!(matches!(
+            Frame::decode(&big),
+            Err(ProtocolError::TooLarge(_))
+        ));
     }
 
     #[test]
     fn oversized_chunk_refused_on_encode() {
-        let f = Frame::Data(DataChunk { transfer: Uuid::nil(), file_index: 0, offset: 0, data: vec![0; MAX_CHUNK + 1] });
+        let f = Frame::Data(DataChunk {
+            transfer: Uuid::nil(),
+            file_index: 0,
+            offset: 0,
+            data: vec![0; MAX_CHUNK + 1],
+        });
         assert!(f.encode().is_err());
     }
 }

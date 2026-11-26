@@ -55,7 +55,6 @@ impl Session {
         self.close_notify.notify_waiters();
         self.close_notify.notify_one();
     }
-
 }
 
 pub(crate) fn peer_id_of(key: &[u8; 32]) -> String {
@@ -64,25 +63,40 @@ pub(crate) fn peer_id_of(key: &[u8; 32]) -> String {
 
 /// Exécute une session jusqu'à sa fin. `initiator` : nous avons ouvert la connexion.
 pub(crate) async fn run(inner: Arc<Inner>, est: Established, initiator: bool) {
-    let Established { mode, peer_key, peer_addr, mut reader, mut writer } = est;
+    let Established {
+        mode,
+        peer_key,
+        peer_addr,
+        mut reader,
+        mut writer,
+    } = est;
     let peer_id = peer_id_of(&peer_key);
 
     // 1. Hello
-    let hello = Message::Hello { protocol: PROTOCOL_VERSION, device: inner.cfg.device.clone() };
+    let hello = Message::Hello {
+        protocol: PROTOCOL_VERSION,
+        device: inner.cfg.device.clone(),
+    };
     if writer.write_frame(&Frame::Control(hello)).await.is_err() || writer.flush().await.is_err() {
         return;
     }
     let remote = match tokio::time::timeout(HELLO_TIMEOUT, reader.read_frame()).await {
         Ok(Ok(Frame::Control(Message::Hello { protocol, device }))) => {
             if check_version(protocol).is_err() {
-                inner.emit(Event::IncompatibleVersion { peer_id: Some(peer_id), remote: protocol, local: PROTOCOL_VERSION });
+                inner.emit(Event::IncompatibleVersion {
+                    peer_id: Some(peer_id),
+                    remote: protocol,
+                    local: PROTOCOL_VERSION,
+                });
                 return;
             }
             device
         }
         _ => {
             if mode == SessionMode::Pairing {
-                inner.emit(Event::PairingFailed { reason: "le pair n'a pas répondu".into() });
+                inner.emit(Event::PairingFailed {
+                    reason: "le pair n'a pas répondu".into(),
+                });
             }
             return;
         }
@@ -91,12 +105,30 @@ pub(crate) async fn run(inner: Arc<Inner>, est: Established, initiator: bool) {
     // 2. Association : confirmation explicite côté PC, enregistrement des deux côtés.
     if mode == SessionMode::Pairing {
         let addr = initiator.then(|| peer_addr.to_string());
-        if !pairing_confirmation(&inner, &peer_id, &peer_key, &remote, &mut reader, &mut writer, addr).await {
+        if !pairing_confirmation(
+            &inner,
+            &peer_id,
+            &peer_key,
+            &remote,
+            &mut reader,
+            &mut writer,
+            addr,
+        )
+        .await
+        {
             return;
         }
     } else {
         // Appareil déjà associé : rafraîchit nom, modèle, version.
-        if inner.store.upsert_device(&peer_key, &remote, initiator.then(|| peer_addr.to_string()).as_deref()).is_err() {
+        if inner
+            .store
+            .upsert_device(
+                &peer_key,
+                &remote,
+                initiator.then(|| peer_addr.to_string()).as_deref(),
+            )
+            .is_err()
+        {
             return;
         }
     }
@@ -112,10 +144,19 @@ pub(crate) async fn run(inner: Arc<Inner>, est: Established, initiator: bool) {
         closed: AtomicBool::new(false),
         close_notify: Notify::new(),
     });
-    if let Some(old) = inner.sessions.lock().unwrap().insert(peer_id.clone(), session.clone()) {
+    if let Some(old) = inner
+        .sessions
+        .lock()
+        .unwrap()
+        .insert(peer_id.clone(), session.clone())
+    {
         old.close();
     }
-    inner.emit(Event::PeerConnected { peer_id: peer_id.clone(), addr: peer_addr.to_string(), link: "wifi" });
+    inner.emit(Event::PeerConnected {
+        peer_id: peer_id.clone(),
+        addr: peer_addr.to_string(),
+        link: "wifi",
+    });
 
     let writer_task = tokio::spawn(write_loop(writer, ctrl_rx, data_rx, session.clone()));
     let ping_task = tokio::spawn(ping_loop(session.clone()));
@@ -132,7 +173,11 @@ pub(crate) async fn run(inner: Arc<Inner>, est: Established, initiator: bool) {
     let _ = writer_task.await;
     {
         let mut map = inner.sessions.lock().unwrap();
-        if map.get(&peer_id).map(|s| Arc::ptr_eq(s, &session)).unwrap_or(false) {
+        if map
+            .get(&peer_id)
+            .map(|s| Arc::ptr_eq(s, &session))
+            .unwrap_or(false)
+        {
             map.remove(&peer_id);
         }
     }
@@ -155,18 +200,32 @@ async fn pairing_confirmation(
     match inner.cfg.role {
         Role::Pc => {
             let (tx, rx) = oneshot::channel();
-            inner.pending_pairings.lock().unwrap().insert(peer_id.to_string(), tx);
+            inner
+                .pending_pairings
+                .lock()
+                .unwrap()
+                .insert(peer_id.to_string(), tx);
             inner.emit(Event::PairingRequest {
                 peer_id: peer_id.to_string(),
                 device: remote.clone(),
                 fingerprint: nc_security::fingerprint(peer_key),
             });
-            let accepted = matches!(tokio::time::timeout(CONFIRM_TIMEOUT, rx).await, Ok(Ok(true)));
+            let accepted = matches!(
+                tokio::time::timeout(CONFIRM_TIMEOUT, rx).await,
+                Ok(Ok(true))
+            );
             inner.pending_pairings.lock().unwrap().remove(peer_id);
-            let reply = if accepted { Message::PairingAccepted } else { Message::PairingRejected };
-            let sent = writer.write_frame(&Frame::Control(reply)).await.is_ok() && writer.flush().await.is_ok();
+            let reply = if accepted {
+                Message::PairingAccepted
+            } else {
+                Message::PairingRejected
+            };
+            let sent = writer.write_frame(&Frame::Control(reply)).await.is_ok()
+                && writer.flush().await.is_ok();
             if !accepted || !sent {
-                inner.emit(Event::PairingFailed { reason: "association refusée sur le PC".into() });
+                inner.emit(Event::PairingFailed {
+                    reason: "association refusée sur le PC".into(),
+                });
                 return false;
             }
             // Une fenêtre = un appareil.
@@ -176,11 +235,19 @@ async fn pairing_confirmation(
             store_paired(inner, peer_key, remote, None)
         }
         Role::Phone => {
-            let res = tokio::time::timeout(CONFIRM_TIMEOUT + Duration::from_secs(5), reader.read_frame()).await;
+            let res = tokio::time::timeout(
+                CONFIRM_TIMEOUT + Duration::from_secs(5),
+                reader.read_frame(),
+            )
+            .await;
             match res {
-                Ok(Ok(Frame::Control(Message::PairingAccepted))) => store_paired(inner, peer_key, remote, peer_addr.as_deref()),
+                Ok(Ok(Frame::Control(Message::PairingAccepted))) => {
+                    store_paired(inner, peer_key, remote, peer_addr.as_deref())
+                }
                 _ => {
-                    inner.emit(Event::PairingFailed { reason: "association refusée ou délai dépassé sur le PC".into() });
+                    inner.emit(Event::PairingFailed {
+                        reason: "association refusée ou délai dépassé sur le PC".into(),
+                    });
                     false
                 }
             }
@@ -188,7 +255,12 @@ async fn pairing_confirmation(
     }
 }
 
-fn store_paired(inner: &Arc<Inner>, key: &[u8; 32], remote: &nc_protocol::DeviceInfo, addr: Option<&str>) -> bool {
+fn store_paired(
+    inner: &Arc<Inner>,
+    key: &[u8; 32],
+    remote: &nc_protocol::DeviceInfo,
+    addr: Option<&str>,
+) -> bool {
     match inner.store.upsert_device(key, remote, addr) {
         Ok(d) => {
             inner.refused.lock().unwrap().remove(&d.id);
@@ -196,13 +268,20 @@ fn store_paired(inner: &Arc<Inner>, key: &[u8; 32], remote: &nc_protocol::Device
             true
         }
         Err(e) => {
-            inner.emit(Event::Error { message: e.to_string() });
+            inner.emit(Event::Error {
+                message: e.to_string(),
+            });
             false
         }
     }
 }
 
-async fn write_loop(mut w: Writer, mut ctrl: mpsc::Receiver<Vec<u8>>, mut data: mpsc::Receiver<Vec<u8>>, s: Arc<Session>) {
+async fn write_loop(
+    mut w: Writer,
+    mut ctrl: mpsc::Receiver<Vec<u8>>,
+    mut data: mpsc::Receiver<Vec<u8>>,
+    s: Arc<Session>,
+) {
     loop {
         let first = tokio::select! {
             biased;
@@ -269,9 +348,11 @@ async fn read_loop(inner: &Arc<Inner>, s: &Arc<Session>, r: &mut Reader) -> Stri
         match frame {
             Frame::Data(chunk) => transfers::on_chunk(inner, chunk).await,
             // Doit suivre les blocs dans la même file que l'écriture disque.
-            Frame::Control(Message::TransferFileEnd { id, file_index, sha256 }) => {
-                transfers::on_file_end(inner, id, file_index, sha256).await
-            }
+            Frame::Control(Message::TransferFileEnd {
+                id,
+                file_index,
+                sha256,
+            }) => transfers::on_file_end(inner, id, file_index, sha256).await,
             Frame::Control(m) => {
                 if let Some(reason) = dispatch(inner, s, m) {
                     return reason;
@@ -288,7 +369,10 @@ fn dispatch(inner: &Arc<Inner>, s: &Arc<Session>, m: Message) -> Option<String> 
         Message::Ping { nonce } => {
             s.send(&Message::Pong { nonce });
         }
-        Message::Pong { .. } | Message::Hello { .. } | Message::PairingAccepted | Message::PairingRejected => {}
+        Message::Pong { .. }
+        | Message::Hello { .. }
+        | Message::PairingAccepted
+        | Message::PairingRejected => {}
         Message::Bye => return Some("fermée par le pair".into()),
         Message::Unpaired => {
             transfers::abort_peer(inner, &peer);
@@ -296,8 +380,16 @@ fn dispatch(inner: &Arc<Inner>, s: &Arc<Session>, m: Message) -> Option<String> 
             inner.emit(Event::DeviceRemoved { peer_id: peer });
             return Some("association révoquée par le pair".into());
         }
-        Message::Status(status) => inner.emit(Event::Status { peer_id: peer, status }),
-        Message::CommandResult { id, ok, error } => inner.emit(Event::CommandResult { peer_id: peer, id, ok, error }),
+        Message::Status(status) => inner.emit(Event::Status {
+            peer_id: peer,
+            status,
+        }),
+        Message::CommandResult { id, ok, error } => inner.emit(Event::CommandResult {
+            peer_id: peer,
+            id,
+            ok,
+            error,
+        }),
         Message::NotificationPosted(n) => {
             let st = inner.settings();
             if !st.notifications_enabled {
@@ -305,13 +397,18 @@ fn dispatch(inner: &Arc<Inner>, s: &Arc<Session>, m: Message) -> Option<String> 
             }
             let keep = st.store_notification_content && !(n.sensitive && st.hide_sensitive_content);
             let _ = inner.store.insert_notification(&peer, &n, keep);
-            let _ = inner.store.prune_notifications(st.notification_history_limit);
+            let _ = inner
+                .store
+                .prune_notifications(st.notification_history_limit);
             let mut n = n;
             if n.sensitive && st.hide_sensitive_content {
                 n.title = Some("Contenu masqué".into());
                 n.text = None;
             }
-            inner.emit(Event::Notification { peer_id: peer, notification: n });
+            inner.emit(Event::Notification {
+                peer_id: peer,
+                notification: n,
+            });
         }
         Message::NotificationRemoved { key } => {
             let _ = inner.store.mark_notification_removed(&peer, &key);
@@ -319,12 +416,22 @@ fn dispatch(inner: &Arc<Inner>, s: &Arc<Session>, m: Message) -> Option<String> 
         }
         Message::NotificationApps { apps } => {
             let _ = inner.store.set_notification_apps(&peer, &apps);
-            inner.emit(Event::NotificationApps { peer_id: peer, apps });
+            inner.emit(Event::NotificationApps {
+                peer_id: peer,
+                apps,
+            });
         }
-        Message::MediaSessions { sessions } => inner.emit(Event::MediaSessions { peer_id: peer, sessions }),
+        Message::MediaSessions { sessions } => inner.emit(Event::MediaSessions {
+            peer_id: peer,
+            sessions,
+        }),
         Message::Share { kind, content } => {
             if content.len() <= 1 << 20 {
-                inner.emit(Event::Share { peer_id: peer, kind, content });
+                inner.emit(Event::Share {
+                    peer_id: peer,
+                    kind,
+                    content,
+                });
             }
         }
         // Demandes destinées à la plateforme (le téléphone exécute ; Kotlin répond).
@@ -333,15 +440,22 @@ fn dispatch(inner: &Arc<Inner>, s: &Arc<Session>, m: Message) -> Option<String> 
         | Message::NotificationDismiss { .. }
         | Message::NotificationOpen { .. }
         | Message::NotificationFilter { .. }
-        | Message::MediaCommand { .. }) => inner.emit(Event::Request { peer_id: peer, message: m }),
+        | Message::MediaCommand { .. }) => inner.emit(Event::Request {
+            peer_id: peer,
+            message: m,
+        }),
         // Transferts
         Message::TransferOffer { id, files } => transfers::on_offer(inner, &peer, id, files),
         Message::TransferAccept { id, offsets } => transfers::on_accept(inner, &peer, id, offsets),
         Message::TransferReject { id, .. } => transfers::on_reject(inner, id),
         Message::TransferFileEnd { .. } => {}
-        Message::TransferFileVerified { id, file_index, ok } => transfers::on_verified(inner, id, file_index, ok),
+        Message::TransferFileVerified { id, file_index, ok } => {
+            transfers::on_verified(inner, id, file_index, ok)
+        }
         Message::TransferPause { id } => transfers::on_remote_pause(inner, id),
-        Message::TransferResume { id, offsets } => transfers::on_remote_resume(inner, &peer, id, offsets),
+        Message::TransferResume { id, offsets } => {
+            transfers::on_remote_resume(inner, &peer, id, offsets)
+        }
         Message::TransferCancel { id } => transfers::on_remote_cancel(inner, id),
     }
     None

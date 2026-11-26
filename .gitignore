@@ -9,3 +9,8 @@ apps/android/local.properties
 apps/windows/src-tauri/gen/
 *.keystore
 *.jks
+# Générés par scripts/build-android-native.sh
+apps/android/app/src/main/jniLibs/
+apps/android/app/src/main/java/uniffi/
+apps/android/keystore.properties
+apps/android/.kotlin/

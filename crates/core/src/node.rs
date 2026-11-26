@@ -126,10 +126,16 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new(cfg: NodeConfig, secrets: &dyn SecretStore, sink: Arc<dyn EventSink>) -> Result<Self> {
+    pub fn new(
+        cfg: NodeConfig,
+        secrets: &dyn SecretStore,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<Self> {
         let identity = Identity::load_or_create(secrets)?;
         let store = Store::open(&cfg.data_dir.join("nothing-connect.db"))?;
-        let settings = store.get_setting::<Settings>("settings")?.unwrap_or_default();
+        let settings = store
+            .get_setting::<Settings>("settings")?
+            .unwrap_or_default();
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("nc-core")
@@ -151,7 +157,10 @@ impl Node {
             wake_reconnect: Notify::new(),
             refused: Mutex::new(Default::default()),
         });
-        Ok(Self { inner, rt: Some(rt) })
+        Ok(Self {
+            inner,
+            rt: Some(rt),
+        })
     }
 
     fn rt(&self) -> &tokio::runtime::Runtime {
@@ -163,22 +172,34 @@ impl Node {
         let inner = self.inner.clone();
         // Nettoyage contrôlé des fichiers partiels abandonnés depuis plus de 7 jours.
         let dl = inner.download_dir();
-        std::thread::spawn(move || nc_transfer::purge_stale_partials(&dl, Duration::from_secs(7 * 86_400)));
+        std::thread::spawn(move || {
+            nc_transfer::purge_stale_partials(&dl, Duration::from_secs(7 * 86_400))
+        });
         match inner.cfg.role {
             Role::Pc => {
                 let port = self.rt().block_on(start_listener(inner.clone()))?;
                 #[cfg(feature = "mdns")]
                 if inner.cfg.advertise {
-                    match nc_transport::discovery::Advertiser::start(&inner.cfg.device.name, port, &inner.identity.fingerprint()) {
+                    match nc_transport::discovery::Advertiser::start(
+                        &inner.cfg.device.name,
+                        port,
+                        &inner.identity.fingerprint(),
+                    ) {
                         Ok(a) => std::mem::forget(a), // vit aussi longtemps que le processus
                         Err(e) => tracing::warn!("annonce mDNS impossible : {e}"),
                     }
                 }
-                inner.emit(Event::Started { fingerprint: inner.identity.fingerprint(), port: Some(port) });
+                inner.emit(Event::Started {
+                    fingerprint: inner.identity.fingerprint(),
+                    port: Some(port),
+                });
             }
             Role::Phone => {
                 self.rt().spawn(reconnect_loop(inner.clone()));
-                inner.emit(Event::Started { fingerprint: inner.identity.fingerprint(), port: None });
+                inner.emit(Event::Started {
+                    fingerprint: inner.identity.fingerprint(),
+                    port: None,
+                });
             }
         }
         Ok(())
@@ -187,7 +208,14 @@ impl Node {
     /// Arrêt propre : ferme les sessions (message `Bye`) et interrompt les transferts.
     pub fn stop(&mut self) {
         self.inner.stopping.store(true, Ordering::SeqCst);
-        let sessions: Vec<_> = self.inner.sessions.lock().unwrap().values().cloned().collect();
+        let sessions: Vec<_> = self
+            .inner
+            .sessions
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
         for s in sessions {
             s.send(&Message::Bye);
             s.close();
@@ -216,12 +244,32 @@ impl Node {
             return Err(CoreError::WrongRole("PC"));
         }
         let w = PairingWindow::open();
-        let port = self.listen_addr().map(|a| a.port()).unwrap_or(self.inner.cfg.listen_port);
+        let port = self
+            .listen_addr()
+            .map(|a| a.port())
+            .unwrap_or(self.inner.cfg.listen_port);
         let fp = self.fingerprint();
-        let qr_uri = lan_host.map(|h| QrPayload { host: h.into(), port, code: w.code().into(), pc_fingerprint: fp.clone() }.to_uri());
-        let info = PairingInfo { code: w.code().into(), expires_in_s: w.remaining().as_secs(), qr_uri: qr_uri.clone(), fingerprint: fp };
+        let qr_uri = lan_host.map(|h| {
+            QrPayload {
+                host: h.into(),
+                port,
+                code: w.code().into(),
+                pc_fingerprint: fp.clone(),
+            }
+            .to_uri()
+        });
+        let info = PairingInfo {
+            code: w.code().into(),
+            expires_in_s: w.remaining().as_secs(),
+            qr_uri: qr_uri.clone(),
+            fingerprint: fp,
+        };
         *self.inner.pairing.lock().unwrap() = Some(w);
-        self.inner.emit(Event::PairingWindow { code: info.code.clone(), expires_in_s: info.expires_in_s, qr_uri });
+        self.inner.emit(Event::PairingWindow {
+            code: info.code.clone(),
+            expires_in_s: info.expires_in_s,
+            qr_uri,
+        });
         // Fermeture automatique à l'expiration.
         let inner = self.inner.clone();
         let code = info.code.clone();
@@ -245,7 +293,13 @@ impl Node {
 
     /// PC : confirme ou refuse l'appareil qui a saisi le bon code.
     pub fn confirm_pairing(&self, peer_id: &str, accept: bool) -> Result<()> {
-        let tx = self.inner.pending_pairings.lock().unwrap().remove(peer_id).ok_or(CoreError::UnknownDevice)?;
+        let tx = self
+            .inner
+            .pending_pairings
+            .lock()
+            .unwrap()
+            .remove(peer_id)
+            .ok_or(CoreError::UnknownDevice)?;
         let _ = tx.send(accept);
         Ok(())
     }
@@ -262,7 +316,9 @@ impl Node {
         self.rt().spawn(async move {
             match handshake::connect_pairing(addr, &inner.identity, &code, fp.as_deref()).await {
                 Ok(est) => session::run(inner, est, true).await,
-                Err(e) => inner.emit(Event::PairingFailed { reason: e.to_string() }),
+                Err(e) => inner.emit(Event::PairingFailed {
+                    reason: e.to_string(),
+                }),
             }
         });
         Ok(())
@@ -271,8 +327,16 @@ impl Node {
     /// Téléphone : association depuis le contenu d'un QR code.
     pub fn pair_with_qr(&self, uri: &str) -> Result<()> {
         let q = QrPayload::parse(uri).map_err(|_| CoreError::BadAddress)?;
-        let host = if q.host.contains(':') { format!("[{}]", q.host) } else { q.host.clone() };
-        self.pair_with(&format!("{host}:{}", q.port), &q.code, Some(&q.pc_fingerprint))
+        let host = if q.host.contains(':') {
+            format!("[{}]", q.host)
+        } else {
+            q.host.clone()
+        };
+        self.pair_with(
+            &format!("{host}:{}", q.port),
+            &q.code,
+            Some(&q.pc_fingerprint),
+        )
     }
 
     // ------------------------------------------------------------------ appareils
@@ -288,12 +352,19 @@ impl Node {
             .lock()
             .unwrap()
             .values()
-            .map(|s| PeerLink { peer_id: s.peer_id.clone(), addr: s.addr.to_string(), link: "wifi" })
+            .map(|s| PeerLink {
+                peer_id: s.peer_id.clone(),
+                addr: s.addr.to_string(),
+                link: "wifi",
+            })
             .collect()
     }
 
     pub fn rename_device(&self, peer_id: &str, name: Option<&str>) -> Result<()> {
-        Ok(self.inner.store.rename_device(peer_id, name.filter(|n| !n.trim().is_empty()))?)
+        Ok(self
+            .inner
+            .store
+            .rename_device(peer_id, name.filter(|n| !n.trim().is_empty()))?)
     }
 
     /// Réception automatique des fichiers venant de cet appareil de confiance.
@@ -311,7 +382,9 @@ impl Node {
         if !self.inner.store.remove_device(peer_id)? {
             return Err(CoreError::UnknownDevice);
         }
-        self.inner.emit(Event::DeviceRemoved { peer_id: peer_id.into() });
+        self.inner.emit(Event::DeviceRemoved {
+            peer_id: peer_id.into(),
+        });
         Ok(())
     }
 
@@ -326,7 +399,11 @@ impl Node {
     /// Envoie un message applicatif (état, notification, réponse de commande…).
     pub fn send(&self, peer_id: &str, msg: Message) -> Result<()> {
         let s = self.inner.session(peer_id).ok_or(CoreError::NotConnected)?;
-        if s.send(&msg) { Ok(()) } else { Err(CoreError::NotConnected) }
+        if s.send(&msg) {
+            Ok(())
+        } else {
+            Err(CoreError::NotConnected)
+        }
     }
 
     /// Variante JSON (liaisons Kotlin / TypeScript) : le message est validé avant envoi.
@@ -337,7 +414,14 @@ impl Node {
 
     /// Envoie un message à tous les pairs connectés (ex. téléphone → PC).
     pub fn broadcast(&self, msg: Message) -> usize {
-        let sessions: Vec<_> = self.inner.sessions.lock().unwrap().values().cloned().collect();
+        let sessions: Vec<_> = self
+            .inner
+            .sessions
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
         sessions.iter().filter(|s| s.send(&msg)).count()
     }
 
@@ -355,7 +439,11 @@ impl Node {
     }
 
     /// Envoie des entrées avec un nom d'affichage (Android : descripteurs ouverts).
-    pub fn send_named(&self, peer_id: &str, inputs: Vec<(PathBuf, Option<String>)>) -> Result<Uuid> {
+    pub fn send_named(
+        &self,
+        peer_id: &str,
+        inputs: Vec<(PathBuf, Option<String>)>,
+    ) -> Result<Uuid> {
         crate::transfers::send_named(&self.inner, peer_id, inputs)
     }
 
@@ -399,8 +487,16 @@ impl Node {
 
     /// PC : active/désactive une application ; le filtre est appliqué **sur le téléphone**.
     pub fn set_notification_app(&self, peer_id: &str, package: &str, enabled: bool) -> Result<()> {
-        self.inner.store.set_notification_app_enabled(peer_id, package, enabled)?;
-        self.send(peer_id, Message::NotificationFilter { package: package.into(), enabled })
+        self.inner
+            .store
+            .set_notification_app_enabled(peer_id, package, enabled)?;
+        self.send(
+            peer_id,
+            Message::NotificationFilter {
+                package: package.into(),
+                enabled,
+            },
+        )
     }
 
     // ------------------------------------------------------------------ réglages
@@ -415,7 +511,14 @@ impl Node {
         let now_suspended = s.suspended;
         *self.inner.settings.lock().unwrap() = s;
         if now_suspended && !was_suspended {
-            let sessions: Vec<_> = self.inner.sessions.lock().unwrap().values().cloned().collect();
+            let sessions: Vec<_> = self
+                .inner
+                .sessions
+                .lock()
+                .unwrap()
+                .values()
+                .cloned()
+                .collect();
             for s in sessions {
                 s.send(&Message::Bye);
                 s.close();
@@ -451,7 +554,10 @@ async fn start_listener(inner: Arc<Inner>) -> Result<u16> {
     let listener = match TcpListener::bind(want).await {
         Ok(l) => l,
         Err(e) => {
-            tracing::warn!("port {} indisponible ({e}), choix d'un port libre", inner.cfg.listen_port);
+            tracing::warn!(
+                "port {} indisponible ({e}), choix d'un port libre",
+                inner.cfg.listen_port
+            );
             TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 0))).await?
         }
     };
@@ -474,10 +580,18 @@ async fn start_listener(inner: Arc<Inner>) -> Result<u16> {
             tokio::spawn(async move {
                 match handshake::accept(stream, &inner.identity, &*inner).await {
                     Ok(est) => session::run(inner, est, false).await,
-                    Err(TransportError::Protocol(nc_protocol::ProtocolError::IncompatibleVersion { remote, .. })) => {
-                        inner.emit(Event::IncompatibleVersion { peer_id: None, remote, local: nc_protocol::PROTOCOL_VERSION });
+                    Err(TransportError::Protocol(
+                        nc_protocol::ProtocolError::IncompatibleVersion { remote, .. },
+                    )) => {
+                        inner.emit(Event::IncompatibleVersion {
+                            peer_id: None,
+                            remote,
+                            local: nc_protocol::PROTOCOL_VERSION,
+                        });
                     }
-                    Err(TransportError::PairingFailed) => inner.emit(Event::PairingFailed { reason: "code incorrect".into() }),
+                    Err(TransportError::PairingFailed) => inner.emit(Event::PairingFailed {
+                        reason: "code incorrect".into(),
+                    }),
                     Err(e) => tracing::debug!("connexion refusée depuis {from} : {e}"),
                 }
             });
@@ -503,7 +617,8 @@ async fn reconnect_loop(inner: Arc<Inner>) {
                 .filter(|d| d.platform == Platform::Windows)
                 .collect();
             for pc in pcs {
-                if inner.session(&pc.id).is_some() || inner.refused.lock().unwrap().contains(&pc.id) {
+                if inner.session(&pc.id).is_some() || inner.refused.lock().unwrap().contains(&pc.id)
+                {
                     continue;
                 }
                 all_connected = false;
@@ -512,7 +627,11 @@ async fn reconnect_loop(inner: Arc<Inner>) {
                 }
             }
         }
-        let wait = if all_connected { Duration::from_secs(30) } else { backoff };
+        let wait = if all_connected {
+            Duration::from_secs(30)
+        } else {
+            backoff
+        };
         tokio::select! {
             _ = tokio::time::sleep(wait) => {}
             _ = inner.wake_reconnect.notified() => backoff = Duration::from_secs(2),
@@ -524,12 +643,23 @@ async fn reconnect_loop(inner: Arc<Inner>) {
 }
 
 async fn try_connect(inner: &Arc<Inner>, pc: &DeviceRecord) -> bool {
-    let Ok(key): std::result::Result<[u8; 32], _> = pc.public_key.as_slice().try_into() else { return false };
-    let mut candidates: Vec<SocketAddr> = pc.last_addr.as_deref().and_then(|a| a.parse().ok()).into_iter().collect();
+    let Ok(key): std::result::Result<[u8; 32], _> = pc.public_key.as_slice().try_into() else {
+        return false;
+    };
+    let mut candidates: Vec<SocketAddr> = pc
+        .last_addr
+        .as_deref()
+        .and_then(|a| a.parse().ok())
+        .into_iter()
+        .collect();
     #[cfg(feature = "mdns")]
     {
         let fp = nc_security::fingerprint(&key);
-        if let Ok(Ok(found)) = tokio::task::spawn_blocking(|| nc_transport::discovery::browse(Duration::from_millis(1500))).await {
+        if let Ok(Ok(found)) = tokio::task::spawn_blocking(|| {
+            nc_transport::discovery::browse(Duration::from_millis(1500))
+        })
+        .await
+        {
             for d in found.into_iter().filter(|d| d.fingerprint == fp) {
                 for a in d.addrs {
                     if !candidates.contains(&a) {
@@ -549,7 +679,9 @@ async fn try_connect(inner: &Arc<Inner>, pc: &DeviceRecord) -> bool {
             Err(TransportError::UnknownPeer) => {
                 // Le PC ne nous reconnaît plus (révocation) : ne pas insister.
                 inner.refused.lock().unwrap().insert(pc.id.clone());
-                inner.emit(Event::PeerRefused { peer_id: pc.id.clone() });
+                inner.emit(Event::PeerRefused {
+                    peer_id: pc.id.clone(),
+                });
                 return false;
             }
             Err(e) => tracing::debug!("connexion à {addr} impossible : {e}"),
