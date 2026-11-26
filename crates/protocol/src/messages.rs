@@ -46,8 +46,113 @@ pub enum Capability {
     Vibrate,
     MediaVolume,
     DoNotDisturb,
+    /// Synchronisation du presse-papiers (texte).
+    Clipboard,
+    /// Le téléphone peut diffuser son écran (MediaProjection).
+    ScreenMirror,
+    /// Le téléphone accepte le contrôle à distance (service d'accessibilité activé).
+    MirrorControl,
+    /// Le téléphone peut diffuser son audio (AudioPlaybackCapture).
+    PhoneAudio,
+    /// L'appareil peut lire un flux audio reçu.
+    AudioPlayback,
+    /// Le PC peut créer un écran étendu (pilote installé) / le téléphone peut l'afficher.
+    ExtendedDisplay,
     #[serde(other)]
     Unknown,
+}
+
+/// Flux temps réel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum StreamKind {
+    /// Écran du téléphone vers le PC (H.264).
+    Mirror = 1,
+    /// Son du téléphone vers le PC (PCM).
+    PhoneAudio = 2,
+    /// Son du PC vers le téléphone (PCM).
+    PcAudio = 3,
+    /// Écran étendu Windows vers le téléphone.
+    Display = 4,
+}
+
+impl StreamKind {
+    pub fn from_u8(v: u8) -> Option<Self> {
+        Some(match v {
+            1 => Self::Mirror,
+            2 => Self::PhoneAudio,
+            3 => Self::PcAudio,
+            4 => Self::Display,
+            _ => return None,
+        })
+    }
+}
+
+/// Paramètres d'un flux. Champs absents = choix automatique de l'émetteur.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StreamParams {
+    /// "h264", "jpeg", "pcm_s16le".
+    pub codec: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// Plus grand côté souhaité (mise à l'échelle par l'émetteur).
+    pub max_size: Option<u32>,
+    pub fps: Option<u32>,
+    pub bitrate: Option<u32>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u16>,
+    /// Pour le miroir : inclure aussi le son.
+    pub with_audio: Option<bool>,
+    /// Pour l'écran étendu : densité (dpi) et fréquence proposées par le téléphone.
+    pub dpi: Option<u32>,
+    pub refresh_hz: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhoneKey {
+    Back,
+    Home,
+    Recents,
+    Notifications,
+}
+
+/// Commande de contrôle à distance du téléphone (coordonnées normalisées 0..1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "i", rename_all = "snake_case")]
+pub enum InputEvent {
+    Tap {
+        x: f32,
+        y: f32,
+    },
+    LongPress {
+        x: f32,
+        y: f32,
+    },
+    Swipe {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        duration_ms: u32,
+    },
+    Key {
+        key: PhoneKey,
+    },
+    Text {
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PointerAction {
+    Down,
+    Move,
+    Up,
+    Cancel,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -304,6 +409,42 @@ pub enum Message {
     TransferCancel {
         id: Uuid,
     },
+
+    // --- presse-papiers ---
+    Clipboard {
+        content: String,
+    },
+
+    // --- flux temps réel ---
+    /// Demande au pair de démarrer un flux (ex. le PC demande l'écran du téléphone).
+    StreamRequest {
+        kind: StreamKind,
+        #[serde(default)]
+        params: StreamParams,
+    },
+    /// L'émetteur annonce le format réel du flux.
+    StreamStart {
+        kind: StreamKind,
+        params: StreamParams,
+    },
+    StreamStop {
+        kind: StreamKind,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    /// Demande d'image clé (après perte ou au démarrage du décodeur).
+    StreamKeyframe {
+        kind: StreamKind,
+    },
+    /// PC → téléphone : contrôle du miroir.
+    Input(InputEvent),
+    /// Téléphone → PC : toucher sur l'écran étendu (coordonnées normalisées 0..1).
+    DisplayPointer {
+        action: PointerAction,
+        pointer: u32,
+        x: f32,
+        y: f32,
+    },
 }
 
 #[cfg(test)]
@@ -326,6 +467,25 @@ mod tests {
         assert_eq!(
             s,
             r#"{"t":"command","id":1,"command":{"c":"vibrate","millis":300}}"#
+        );
+    }
+
+    #[test]
+    fn stream_messages_shape() {
+        let m = Message::StreamRequest {
+            kind: StreamKind::Mirror,
+            params: StreamParams {
+                max_size: Some(1280),
+                ..Default::default()
+            },
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        assert!(s.starts_with(r#"{"t":"stream_request","kind":"mirror""#));
+        assert_eq!(serde_json::from_str::<Message>(&s).unwrap(), m);
+        let i = Message::Input(InputEvent::Tap { x: 0.5, y: 0.25 });
+        assert_eq!(
+            serde_json::to_string(&i).unwrap(),
+            r#"{"t":"input","i":"tap","x":0.5,"y":0.25}"#
         );
     }
 

@@ -11,7 +11,7 @@ mod settings;
 mod speed;
 mod transfers;
 
-pub use events::{Event, EventSink, NullSink, TransferFileView, TransferState};
+pub use events::{Event, EventSink, NullSink, StreamPacket, TransferFileView, TransferState};
 pub use nc_protocol as protocol;
 pub use nc_security::{MemoryStore, SecretStore, SecurityError};
 pub use nc_storage::{DeviceRecord, NotificationRecord, TransferRecord};

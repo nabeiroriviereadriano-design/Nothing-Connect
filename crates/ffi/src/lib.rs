@@ -36,6 +36,12 @@ pub trait EventListener: Send + Sync {
     fn on_event(&self, json: String);
 }
 
+/// Reçoit les unités de flux temps réel (audio du PC, écran étendu) sans passer par JSON.
+#[uniffi::export(with_foreign)]
+pub trait StreamListener: Send + Sync {
+    fn on_stream(&self, peer_id: String, kind: u8, flags: u8, ts_us: u64, data: Vec<u8>);
+}
+
 /// Coffre de secrets implémenté en Kotlin (Android Keystore).
 #[uniffi::export(with_foreign)]
 pub trait SecretVault: Send + Sync {
@@ -44,12 +50,16 @@ pub trait SecretVault: Send + Sync {
     fn delete(&self, name: String) -> bool;
 }
 
-struct Sink(Arc<dyn EventListener>);
+struct Sink(Arc<dyn EventListener>, Arc<dyn StreamListener>);
 impl EventSink for Sink {
     fn emit(&self, e: Event) {
         if let Ok(j) = serde_json::to_string(&e) {
             self.0.on_event(j);
         }
+    }
+    fn stream(&self, peer_id: &str, p: nc_core::StreamPacket) {
+        self.1
+            .on_stream(peer_id.to_string(), p.kind as u8, p.flags, p.ts_us, p.data);
     }
 }
 
@@ -124,6 +134,7 @@ impl NcNode {
         device_json: String,
         vault: Arc<dyn SecretVault>,
         listener: Arc<dyn EventListener>,
+        streams: Arc<dyn StreamListener>,
     ) -> R<Arc<Self>> {
         #[cfg(target_os = "android")]
         android_logger::init_once(
@@ -141,7 +152,7 @@ impl NcNode {
             advertise: false,
         };
         let vault = Vault(vault);
-        let node = Node::new(cfg, &vault, Arc::new(Sink(listener)))?;
+        let node = Node::new(cfg, &vault, Arc::new(Sink(listener, streams)))?;
         Ok(Arc::new(Self {
             node: Mutex::new(node),
             vault,
@@ -251,6 +262,30 @@ impl NcNode {
         let s: Settings = serde_json::from_str(&json)?;
         Ok(self.node.lock().unwrap().set_settings(s)?)
     }
+    /// Envoie une unité de flux (1 = miroir, 2 = audio du téléphone, 3 = audio du PC,
+    /// 4 = écran étendu). `false` : unité abandonnée (réseau saturé ou PC absent).
+    pub fn send_stream(
+        &self,
+        peer_id: String,
+        kind: u8,
+        flags: u8,
+        ts_us: u64,
+        data: Vec<u8>,
+    ) -> bool {
+        let Some(kind) = nc_core::protocol::StreamKind::from_u8(kind) else {
+            return false;
+        };
+        self.node
+            .lock()
+            .unwrap()
+            .send_stream(&peer_id, kind, flags, ts_us, &data)
+    }
+
+    /// Signale un flux actif (empêche la bascule automatique Wi-Fi → USB pendant le flux).
+    pub fn set_streaming(&self, active: bool) {
+        self.node.lock().unwrap().set_streaming(active);
+    }
+
     /// Efface toutes les données et l'identité de l'appareil.
     pub fn wipe(&self) -> R<()> {
         Ok(self.node.lock().unwrap().wipe(&self.vault)?)

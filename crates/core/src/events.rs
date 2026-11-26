@@ -120,6 +120,10 @@ pub enum Event {
         kind: ShareKind,
         content: String,
     },
+    Clipboard {
+        peer_id: String,
+        content: String,
+    },
     CommandResult {
         peer_id: String,
         id: u64,
@@ -167,6 +171,19 @@ pub enum Event {
 /// Récepteur des événements (implémenté par la couche d'application).
 pub trait EventSink: Send + Sync {
     fn emit(&self, event: Event);
+    /// Unité de flux temps réel reçue (vidéo, audio). Appelé sur le fil réseau : doit
+    /// rendre la main vite (copier dans une file, pas de décodage ici).
+    fn stream(&self, _peer_id: &str, _packet: StreamPacket) {}
+}
+
+/// Unité de flux complète (fragments réassemblés).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamPacket {
+    pub kind: nc_protocol::StreamKind,
+    /// `stream_flags::CONFIG` / `KEYFRAME`.
+    pub flags: u8,
+    pub ts_us: u64,
+    pub data: Vec<u8>,
 }
 
 /// Récepteur qui ignore tout (tests).

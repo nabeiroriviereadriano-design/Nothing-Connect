@@ -71,6 +71,8 @@ pub(crate) struct Inner {
     pub stopping: AtomicBool,
     pub wake_reconnect: Notify,
     pub refused: Mutex<std::collections::HashSet<String>>,
+    /// Un flux temps réel est actif (la plateforme le signale) : pas de bascule de liaison.
+    pub streaming: AtomicBool,
 }
 
 impl Inner {
@@ -156,6 +158,7 @@ impl Node {
             stopping: AtomicBool::new(false),
             wake_reconnect: Notify::new(),
             refused: Mutex::new(Default::default()),
+            streaming: AtomicBool::new(false),
         });
         Ok(Self {
             inner,
@@ -355,7 +358,7 @@ impl Node {
             .map(|s| PeerLink {
                 peer_id: s.peer_id.clone(),
                 addr: s.addr.to_string(),
-                link: "wifi",
+                link: crate::session::link_of(&s.addr),
             })
             .collect()
     }
@@ -423,6 +426,26 @@ impl Node {
             .cloned()
             .collect();
         sessions.iter().filter(|s| s.send(&msg)).count()
+    }
+
+    /// La plateforme signale qu'un flux (miroir, audio, écran) est actif ou non.
+    pub fn set_streaming(&self, active: bool) {
+        self.inner.streaming.store(active, Ordering::SeqCst);
+    }
+
+    /// Envoie une unité de flux temps réel ; `false` si abandonnée (réseau saturé ou pair absent).
+    pub fn send_stream(
+        &self,
+        peer_id: &str,
+        kind: nc_protocol::StreamKind,
+        flags: u8,
+        ts_us: u64,
+        data: &[u8],
+    ) -> bool {
+        self.inner
+            .session(peer_id)
+            .map(|s| s.send_stream(kind, flags, ts_us, data))
+            .unwrap_or(false)
     }
 
     pub fn command(&self, peer_id: &str, command: RemoteCommand) -> Result<u64> {
@@ -617,8 +640,11 @@ async fn reconnect_loop(inner: Arc<Inner>) {
                 .filter(|d| d.platform == Platform::Windows)
                 .collect();
             for pc in pcs {
-                if inner.session(&pc.id).is_some() || inner.refused.lock().unwrap().contains(&pc.id)
-                {
+                if inner.session(&pc.id).is_some() {
+                    upgrade_to_usb(&inner, &pc).await;
+                    continue;
+                }
+                if inner.refused.lock().unwrap().contains(&pc.id) {
                     continue;
                 }
                 all_connected = false;
@@ -628,7 +654,7 @@ async fn reconnect_loop(inner: Arc<Inner>) {
             }
         }
         let wait = if all_connected {
-            Duration::from_secs(30)
+            Duration::from_secs(10)
         } else {
             backoff
         };
@@ -642,50 +668,95 @@ async fn reconnect_loop(inner: Arc<Inner>) {
     }
 }
 
+/// Adresse vue par le téléphone quand le PC a fait `adb reverse` (câble USB).
+fn usb_addr() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], nc_transport::DEFAULT_PORT))
+}
+
+async fn connect_to(
+    inner: &Arc<Inner>,
+    key: &[u8; 32],
+    addr: SocketAddr,
+) -> std::result::Result<(), TransportError> {
+    let est = handshake::connect_paired(addr, &inner.identity, key).await?;
+    tokio::spawn(session::run(inner.clone(), est, true));
+    Ok(())
+}
+
+/// Essaie, dans l'ordre : USB (adb reverse), dernière adresse connue, puis découverte mDNS.
 async fn try_connect(inner: &Arc<Inner>, pc: &DeviceRecord) -> bool {
     let Ok(key): std::result::Result<[u8; 32], _> = pc.public_key.as_slice().try_into() else {
         return false;
     };
-    let mut candidates: Vec<SocketAddr> = pc
-        .last_addr
-        .as_deref()
-        .and_then(|a| a.parse().ok())
-        .into_iter()
-        .collect();
-    #[cfg(feature = "mdns")]
-    {
-        let fp = nc_security::fingerprint(&key);
-        if let Ok(Ok(found)) = tokio::task::spawn_blocking(|| {
-            nc_transport::discovery::browse(Duration::from_millis(1500))
-        })
-        .await
-        {
-            for d in found.into_iter().filter(|d| d.fingerprint == fp) {
-                for a in d.addrs {
-                    if !candidates.contains(&a) {
-                        candidates.push(a);
-                    }
+    let mut tried: Vec<SocketAddr> = Vec::new();
+    let mut candidates: Vec<SocketAddr> = vec![usb_addr()];
+    if let Some(a) = pc.last_addr.as_deref().and_then(|a| a.parse().ok()) {
+        candidates.push(a);
+    }
+    for round in 0..2 {
+        if round == 1 {
+            #[cfg(feature = "mdns")]
+            {
+                let fp = nc_security::fingerprint(&key);
+                if let Ok(Ok(found)) = tokio::task::spawn_blocking(|| {
+                    nc_transport::discovery::browse(Duration::from_millis(1500))
+                })
+                .await
+                {
+                    candidates = found
+                        .into_iter()
+                        .filter(|d| d.fingerprint == fp)
+                        .flat_map(|d| d.addrs)
+                        .filter(|a| !tried.contains(a))
+                        .collect();
                 }
             }
+            #[cfg(not(feature = "mdns"))]
+            {
+                candidates.clear();
+            }
         }
-    }
-    for addr in candidates {
-        match handshake::connect_paired(addr, &inner.identity, &key).await {
-            Ok(est) => {
-                let inner = inner.clone();
-                tokio::spawn(session::run(inner, est, true));
-                return true;
+        for addr in std::mem::take(&mut candidates) {
+            tried.push(addr);
+            match connect_to(inner, &key, addr).await {
+                Ok(()) => return true,
+                Err(TransportError::UnknownPeer) => {
+                    // Le PC ne nous reconnaît plus (révocation) : ne pas insister.
+                    inner.refused.lock().unwrap().insert(pc.id.clone());
+                    inner.emit(Event::PeerRefused {
+                        peer_id: pc.id.clone(),
+                    });
+                    return false;
+                }
+                Err(e) => tracing::debug!("connexion à {addr} impossible : {e}"),
             }
-            Err(TransportError::UnknownPeer) => {
-                // Le PC ne nous reconnaît plus (révocation) : ne pas insister.
-                inner.refused.lock().unwrap().insert(pc.id.clone());
-                inner.emit(Event::PeerRefused {
-                    peer_id: pc.id.clone(),
-                });
-                return false;
-            }
-            Err(e) => tracing::debug!("connexion à {addr} impossible : {e}"),
         }
     }
     false
+}
+
+/// Passe sur USB quand le câble devient disponible, seulement si aucune opération n'est en
+/// cours (pas de bascule silencieuse pendant un transfert ou un flux).
+async fn upgrade_to_usb(inner: &Arc<Inner>, pc: &DeviceRecord) {
+    let Some(s) = inner.session(&pc.id) else {
+        return;
+    };
+    if s.addr.ip().is_loopback()
+        || inner.streaming.load(Ordering::SeqCst)
+        || crate::transfers::busy(inner, &pc.id)
+    {
+        return;
+    }
+    let Ok(key): std::result::Result<[u8; 32], _> = pc.public_key.as_slice().try_into() else {
+        return;
+    };
+    // Sonde rapide : sans adb reverse, la connexion est refusée immédiatement.
+    let probe = tokio::time::timeout(
+        Duration::from_millis(500),
+        tokio::net::TcpStream::connect(usb_addr()),
+    );
+    let usb_ready = matches!(probe.await, Ok(Ok(_)));
+    if usb_ready && connect_to(inner, &key, usb_addr()).await.is_ok() {
+        tracing::info!("liaison basculée sur USB");
+    }
 }

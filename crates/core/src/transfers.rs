@@ -979,6 +979,16 @@ pub(crate) fn on_disconnected(inner: &Arc<Inner>, peer: &str) {
     }
 }
 
+/// Un transfert non terminé existe-t-il avec ce pair ?
+pub(crate) fn busy(inner: &Arc<Inner>, peer: &str) -> bool {
+    inner
+        .transfers
+        .lock()
+        .unwrap()
+        .values()
+        .any(|c| c.peer_id == peer && !c.state().is_final())
+}
+
 /// Annule silencieusement tous les transferts d'un appareil (révocation).
 pub(crate) fn abort_peer(inner: &Arc<Inner>, peer: &str) {
     let list: Vec<_> = inner

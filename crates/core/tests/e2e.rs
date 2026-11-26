@@ -11,12 +11,17 @@ use std::time::{Duration, Instant};
 #[derive(Default)]
 struct Collector {
     events: Mutex<Vec<Event>>,
+    packets: Mutex<Vec<nc_core::StreamPacket>>,
     cv: Condvar,
 }
 
 impl EventSink for Collector {
     fn emit(&self, e: Event) {
         self.events.lock().unwrap().push(e);
+        self.cv.notify_all();
+    }
+    fn stream(&self, _peer: &str, p: nc_core::StreamPacket) {
+        self.packets.lock().unwrap().push(p);
         self.cv.notify_all();
     }
 }
@@ -561,4 +566,104 @@ fn throughput_loopback() {
     let mbps = size as f64 / t.elapsed().as_secs_f64() / 1e6;
     eprintln!("DEBIT boucle locale (chiffré + SHA-256 des deux côtés + disque) : {mbps:.0} Mo/s");
     assert!(mbps > 20.0, "débit anormalement faible : {mbps:.1} Mo/s");
+}
+
+#[test]
+fn realtime_streams_are_reassembled_in_order() {
+    use nc_core::protocol::{stream_flags, StreamKind};
+    let pc = peer(Role::Pc);
+    let phone = peer(Role::Phone);
+    let (phone_id, pc_id) = pair(&pc, &phone);
+    // Une image de 300 Ko (fragmentée en 5 trames) puis 20 petites unités audio.
+    let mut big = vec![0u8; 300_000];
+    rand::thread_rng().fill_bytes(&mut big);
+    assert!(phone
+        .node
+        .send_stream(&pc_id, StreamKind::Mirror, stream_flags::KEYFRAME, 1, &big));
+    for i in 0..20u64 {
+        assert!(phone.node.send_stream(
+            &pc_id,
+            StreamKind::PhoneAudio,
+            0,
+            100 + i,
+            &[i as u8; 1920]
+        ));
+    }
+    let deadline = Instant::now() + T;
+    loop {
+        let n = pc.ev.packets.lock().unwrap().len();
+        if n == 21 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "paquets reçus : {n}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let p = pc.ev.packets.lock().unwrap();
+    let video = p.iter().find(|p| p.kind == StreamKind::Mirror).unwrap();
+    assert_eq!(video.data, big);
+    assert_eq!(
+        video.flags,
+        stream_flags::KEYFRAME,
+        "START/END retirés à la réception"
+    );
+    let audio: Vec<u64> = p
+        .iter()
+        .filter(|p| p.kind == StreamKind::PhoneAudio)
+        .map(|p| p.ts_us)
+        .collect();
+    assert_eq!(audio, (100..120).collect::<Vec<_>>());
+    drop(p);
+    // Flux PC → téléphone aussi.
+    assert!(pc
+        .node
+        .send_stream(&phone_id, StreamKind::PcAudio, 0, 7, &[1, 2, 3]));
+    let deadline = Instant::now() + T;
+    while phone.ev.packets.lock().unwrap().is_empty() {
+        assert!(Instant::now() < deadline, "flux PC → téléphone non reçu");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(phone.ev.packets.lock().unwrap()[0].data, vec![1, 2, 3]);
+}
+
+#[test]
+fn congested_stream_drops_units_instead_of_queueing() {
+    use nc_core::protocol::StreamKind;
+    let pc = peer(Role::Pc);
+    let phone = peer(Role::Phone);
+    let (_phone_id, pc_id) = pair(&pc, &phone);
+    // Rafale de 400 images de 1 Mo : la file (≈ 4 Mo) déborde, des images sont abandonnées
+    // au lieu d'accumuler de la latence ; aucune image partielle n'est livrée.
+    let frame = vec![7u8; 1_000_000];
+    let sent = (0..400u64)
+        .filter(|i| {
+            phone
+                .node
+                .send_stream(&pc_id, StreamKind::Mirror, 0, *i, &frame)
+        })
+        .count();
+    assert!(sent < 400, "aucune image abandonnée ({sent} envoyées)");
+    std::thread::sleep(Duration::from_secs(3));
+    let p = pc.ev.packets.lock().unwrap();
+    assert_eq!(p.len(), sent);
+    assert!(p.iter().all(|p| p.data.len() == 1_000_000));
+}
+
+#[test]
+fn clipboard_is_delivered() {
+    let pc = peer(Role::Pc);
+    let phone = peer(Role::Phone);
+    let (phone_id, _) = pair(&pc, &phone);
+    pc.node
+        .send(
+            &phone_id,
+            Message::Clipboard {
+                content: "copié sur le PC".into(),
+            },
+        )
+        .unwrap();
+    let got = phone.ev.wait(T, |e| match e {
+        Event::Clipboard { content, .. } => Some(content.clone()),
+        _ => None,
+    });
+    assert_eq!(got, "copié sur le PC");
 }

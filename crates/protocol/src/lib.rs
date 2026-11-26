@@ -34,8 +34,26 @@ pub const MAX_CHUNK: usize = MAX_FRAME_PLAINTEXT - DATA_HEADER;
 /// Taille maximale acceptée pour un message de contrôle JSON (protection entrées malformées).
 pub const MAX_CONTROL_JSON: usize = MAX_FRAME_PLAINTEXT - 1;
 
+/// En-tête d'un paquet de flux : type(1) + flux(1) + drapeaux(1) + horodatage µs(8).
+pub const STREAM_HEADER: usize = 1 + 1 + 1 + 8;
+/// Charge utile maximale d'un fragment de flux.
+pub const MAX_STREAM_FRAGMENT: usize = MAX_FRAME_PLAINTEXT - STREAM_HEADER;
+
 const KIND_CONTROL: u8 = 1;
 const KIND_DATA: u8 = 2;
+const KIND_STREAM: u8 = 3;
+
+/// Drapeaux d'un paquet de flux.
+pub mod stream_flags {
+    /// Données de configuration du codec (SPS/PPS H.264, format audio).
+    pub const CONFIG: u8 = 0x01;
+    /// Image clé (décodable seule).
+    pub const KEYFRAME: u8 = 0x02;
+    /// Premier fragment d'une unité.
+    pub const START: u8 = 0x04;
+    /// Dernier fragment d'une unité.
+    pub const END: u8 = 0x08;
+}
 
 #[derive(Debug, Error)]
 pub enum ProtocolError {
@@ -135,11 +153,23 @@ pub struct DataChunk {
     pub data: Vec<u8>,
 }
 
+/// Fragment d'un flux temps réel (vidéo, audio). Les unités plus grandes qu'une trame sont
+/// découpées (drapeaux START/END) et réassemblées à la réception.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamFragment {
+    pub stream: StreamKind,
+    pub flags: u8,
+    /// Horodatage de capture en microsecondes (horloge de l'émetteur).
+    pub ts_us: u64,
+    pub data: Vec<u8>,
+}
+
 /// Trame déchiffrée.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
     Control(Message),
     Data(DataChunk),
+    Stream(StreamFragment),
 }
 
 impl Frame {
@@ -154,6 +184,10 @@ impl Frame {
             Frame::Data(c) => {
                 encode_data_header(out, &c.transfer, c.file_index, c.offset);
                 out.extend_from_slice(&c.data);
+            }
+            Frame::Stream(f) => {
+                encode_stream_header(out, f.stream, f.flags, f.ts_us);
+                out.extend_from_slice(&f.data);
             }
         }
         if out.len() > MAX_FRAME_PLAINTEXT {
@@ -189,9 +223,30 @@ impl Frame {
                     data: b[DATA_HEADER..].to_vec(),
                 }))
             }
+            KIND_STREAM => {
+                if b.len() < STREAM_HEADER {
+                    return Err(ProtocolError::Truncated);
+                }
+                let stream = StreamKind::from_u8(b[1]).ok_or(ProtocolError::UnknownKind(b[1]))?;
+                let ts_us = u64::from_be_bytes(b[3..11].try_into().unwrap());
+                Ok(Frame::Stream(StreamFragment {
+                    stream,
+                    flags: b[2],
+                    ts_us,
+                    data: b[STREAM_HEADER..].to_vec(),
+                }))
+            }
             k => Err(ProtocolError::UnknownKind(k)),
         }
     }
+}
+
+/// Écrit l'en-tête d'un fragment de flux.
+pub fn encode_stream_header(out: &mut Vec<u8>, stream: StreamKind, flags: u8, ts_us: u64) {
+    out.push(KIND_STREAM);
+    out.push(stream as u8);
+    out.push(flags);
+    out.extend_from_slice(&ts_us.to_be_bytes());
 }
 
 /// Écrit l'en-tête d'un bloc ; l'appelant ajoute ensuite les données (zéro copie intermédiaire).
@@ -265,6 +320,20 @@ mod tests {
             Frame::decode(&big),
             Err(ProtocolError::TooLarge(_))
         ));
+    }
+
+    #[test]
+    fn stream_roundtrip() {
+        let f = Frame::Stream(StreamFragment {
+            stream: StreamKind::Mirror,
+            flags: stream_flags::START | stream_flags::KEYFRAME,
+            ts_us: 123_456_789,
+            data: vec![9u8; MAX_STREAM_FRAGMENT],
+        });
+        let enc = f.encode().unwrap();
+        assert_eq!(enc.len(), MAX_FRAME_PLAINTEXT);
+        assert_eq!(Frame::decode(&enc).unwrap(), f);
+        assert!(Frame::decode(&[3, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0]).is_err());
     }
 
     #[test]

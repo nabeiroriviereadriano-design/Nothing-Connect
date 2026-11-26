@@ -2,11 +2,17 @@
 //! tâche d'écriture prioritaire et maintien de connexion.
 
 use crate::events::Event;
+use crate::events::StreamPacket;
 use crate::node::{Inner, Role};
 use crate::transfers;
-use nc_protocol::{check_version, Frame, Message, SessionMode, PROTOCOL_VERSION};
+use nc_protocol::StreamFragment;
+use nc_protocol::{
+    check_version, encode_stream_header, stream_flags, Frame, Message, SessionMode, StreamKind,
+    MAX_STREAM_FRAGMENT, PROTOCOL_VERSION, STREAM_HEADER,
+};
 use nc_transport::handshake::{Established, Reader, Writer};
 use nc_transport::TransportError;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -20,11 +26,17 @@ const CONFIRM_TIMEOUT: Duration = Duration::from_secs(90);
 /// File de données : ~16 trames pleines (≈1 Mo) en vol → contre-pression vers le disque.
 const DATA_QUEUE: usize = 16;
 const CTRL_QUEUE: usize = 256;
+/// File des flux temps réel : ≈ 4 Mo. Pleine = réseau saturé → l'unité est abandonnée
+/// (une image perdue vaut mieux qu'une latence qui s'accumule).
+const STREAM_QUEUE: usize = 64;
+/// Taille maximale d'une unité de flux réassemblée (image H.264 / JPEG).
+const MAX_STREAM_UNIT: usize = 16 << 20;
 
 pub(crate) struct Session {
     pub peer_id: String,
     pub addr: SocketAddr,
     ctrl: mpsc::Sender<Vec<u8>>,
+    stream: mpsc::Sender<Vec<u8>>,
     data: mpsc::Sender<Vec<u8>>,
     closed: AtomicBool,
     close_notify: Notify,
@@ -45,6 +57,35 @@ impl Session {
         }
     }
 
+    /// Envoie une unité de flux (découpée en fragments). Tout ou rien : si la file n'a pas
+    /// la place pour l'unité entière, elle est abandonnée et `false` est renvoyé.
+    pub fn send_stream(&self, kind: StreamKind, flags: u8, ts_us: u64, payload: &[u8]) -> bool {
+        if self.closed.load(Ordering::SeqCst) {
+            return false;
+        }
+        let n = payload.len().div_ceil(MAX_STREAM_FRAGMENT).max(1);
+        let Ok(permits) = self.stream.try_reserve_many(n) else {
+            return false;
+        };
+        let base = flags & !(stream_flags::START | stream_flags::END);
+        let mut chunks = payload.chunks(MAX_STREAM_FRAGMENT);
+        for (i, permit) in permits.enumerate() {
+            let part = chunks.next().unwrap_or(&[]);
+            let mut f = base;
+            if i == 0 {
+                f |= stream_flags::START;
+            }
+            if i == n - 1 {
+                f |= stream_flags::END;
+            }
+            let mut buf = Vec::with_capacity(STREAM_HEADER + part.len());
+            encode_stream_header(&mut buf, kind, f, ts_us);
+            buf.extend_from_slice(part);
+            permit.send(buf);
+        }
+        true
+    }
+
     /// File ordonnée (blocs de fichier et fin de fichier), depuis un thread bloquant.
     pub fn data_sender(&self) -> mpsc::Sender<Vec<u8>> {
         self.data.clone()
@@ -54,6 +95,15 @@ impl Session {
         self.closed.store(true, Ordering::SeqCst);
         self.close_notify.notify_waiters();
         self.close_notify.notify_one();
+    }
+}
+
+/// Type de liaison : une connexion via `adb reverse` arrive en boucle locale (câble USB).
+pub(crate) fn link_of(addr: &SocketAddr) -> &'static str {
+    if addr.ip().is_loopback() {
+        "usb"
+    } else {
+        "lan"
     }
 }
 
@@ -136,10 +186,12 @@ pub(crate) async fn run(inner: Arc<Inner>, est: Established, initiator: bool) {
     // 3. Enregistrement de la session (remplace une éventuelle session précédente).
     let (ctrl_tx, ctrl_rx) = mpsc::channel(CTRL_QUEUE);
     let (data_tx, data_rx) = mpsc::channel(DATA_QUEUE);
+    let (stream_tx, stream_rx) = mpsc::channel(STREAM_QUEUE);
     let session = Arc::new(Session {
         peer_id: peer_id.clone(),
         addr: peer_addr,
         ctrl: ctrl_tx,
+        stream: stream_tx,
         data: data_tx,
         closed: AtomicBool::new(false),
         close_notify: Notify::new(),
@@ -155,10 +207,16 @@ pub(crate) async fn run(inner: Arc<Inner>, est: Established, initiator: bool) {
     inner.emit(Event::PeerConnected {
         peer_id: peer_id.clone(),
         addr: peer_addr.to_string(),
-        link: "wifi",
+        link: link_of(&peer_addr),
     });
 
-    let writer_task = tokio::spawn(write_loop(writer, ctrl_rx, data_rx, session.clone()));
+    let writer_task = tokio::spawn(write_loop(
+        writer,
+        ctrl_rx,
+        stream_rx,
+        data_rx,
+        session.clone(),
+    ));
     let ping_task = tokio::spawn(ping_loop(session.clone()));
 
     // Reprise automatique des transferts interrompus vers ce pair.
@@ -279,14 +337,17 @@ fn store_paired(
 async fn write_loop(
     mut w: Writer,
     mut ctrl: mpsc::Receiver<Vec<u8>>,
+    mut stream: mpsc::Receiver<Vec<u8>>,
     mut data: mpsc::Receiver<Vec<u8>>,
     s: Arc<Session>,
 ) {
+    // Priorités : contrôle > flux temps réel > fichiers.
     loop {
         let first = tokio::select! {
             biased;
             _ = s.close_notify.notified() => break,
             m = ctrl.recv() => m,
+            m = stream.recv() => m,
             m = data.recv() => m,
         };
         let Some(first) = first else { break };
@@ -297,7 +358,10 @@ async fn write_loop(
         // système), en servant toujours le contrôle en premier.
         let mut ok = true;
         for _ in 0..32 {
-            let next = ctrl.try_recv().or_else(|_| data.try_recv());
+            let next = ctrl
+                .try_recv()
+                .or_else(|_| stream.try_recv())
+                .or_else(|_| data.try_recv());
             match next {
                 Ok(b) => {
                     if w.write_raw(&b).await.is_err() {
@@ -333,7 +397,52 @@ async fn ping_loop(s: Arc<Session>) {
     }
 }
 
+/// Réassemblage des unités de flux fragmentées.
+#[derive(Default)]
+struct Assembler {
+    parts: HashMap<StreamKind, (u64, u8, Vec<u8>)>,
+}
+
+impl Assembler {
+    fn push(&mut self, f: StreamFragment) -> Option<StreamPacket> {
+        let start = f.flags & stream_flags::START != 0;
+        let end = f.flags & stream_flags::END != 0;
+        let clean = f.flags & !(stream_flags::START | stream_flags::END);
+        if start && end {
+            self.parts.remove(&f.stream);
+            return Some(StreamPacket {
+                kind: f.stream,
+                flags: clean,
+                ts_us: f.ts_us,
+                data: f.data,
+            });
+        }
+        if start {
+            self.parts.insert(f.stream, (f.ts_us, clean, f.data));
+            return None;
+        }
+        let entry = self.parts.get_mut(&f.stream)?;
+        if entry.0 != f.ts_us || entry.2.len() + f.data.len() > MAX_STREAM_UNIT {
+            // Fragment orphelin ou unité trop grande : abandon de l'unité.
+            self.parts.remove(&f.stream);
+            return None;
+        }
+        entry.2.extend_from_slice(&f.data);
+        if end {
+            let (ts_us, flags, data) = self.parts.remove(&f.stream)?;
+            return Some(StreamPacket {
+                kind: f.stream,
+                flags,
+                ts_us,
+                data,
+            });
+        }
+        None
+    }
+}
+
 async fn read_loop(inner: &Arc<Inner>, s: &Arc<Session>, r: &mut Reader) -> String {
+    let mut asm = Assembler::default();
     loop {
         let frame = tokio::select! {
             f = tokio::time::timeout(IDLE_TIMEOUT, r.read_frame()) => f,
@@ -347,6 +456,11 @@ async fn read_loop(inner: &Arc<Inner>, s: &Arc<Session>, r: &mut Reader) -> Stri
         };
         match frame {
             Frame::Data(chunk) => transfers::on_chunk(inner, chunk).await,
+            Frame::Stream(f) => {
+                if let Some(p) = asm.push(f) {
+                    inner.sink.stream(&s.peer_id, p);
+                }
+            }
             // Doit suivre les blocs dans la même file que l'écriture disque.
             Frame::Control(Message::TransferFileEnd {
                 id,
@@ -449,6 +563,24 @@ fn dispatch(inner: &Arc<Inner>, s: &Arc<Session>, m: Message) -> Option<String> 
         Message::TransferAccept { id, offsets } => transfers::on_accept(inner, &peer, id, offsets),
         Message::TransferReject { id, .. } => transfers::on_reject(inner, id),
         Message::TransferFileEnd { .. } => {}
+        Message::Clipboard { content } => {
+            if content.len() <= 1 << 20 {
+                inner.emit(Event::Clipboard {
+                    peer_id: peer,
+                    content,
+                });
+            }
+        }
+        // Flux temps réel et contrôle : traités par la plateforme.
+        m @ (Message::StreamRequest { .. }
+        | Message::StreamStart { .. }
+        | Message::StreamStop { .. }
+        | Message::StreamKeyframe { .. }
+        | Message::Input(_)
+        | Message::DisplayPointer { .. }) => inner.emit(Event::Request {
+            peer_id: peer,
+            message: m,
+        }),
         Message::TransferFileVerified { id, file_index, ok } => {
             transfers::on_verified(inner, id, file_index, ok)
         }
