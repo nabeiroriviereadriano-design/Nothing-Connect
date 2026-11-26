@@ -51,10 +51,11 @@ Prologue Noise : `nothing-connect/1`.
 | `stream_keyframe` | ↔ | Demande d'image clé (décodeur qui démarre, image perdue) |
 | `input` | PC → tél. | Contrôle du miroir : `tap`, `long_press`, `swipe`, `key` (`back`, `home`, `recents`, `notifications`), `text` ; coordonnées 0..1 |
 | `display_pointer` | tél. → PC | Toucher sur l'écran étendu : `down`/`move`/`up`/`cancel`, identifiant, coordonnées 0..1 |
+| `display_input` | tél. → PC | Écran étendu : `{"a":"key","key":…}` (`back`, `task_view`, `show_desktop`, `next_app`, `prev_app`, `next_desktop`, `prev_desktop`, `touch_keyboard`, `backspace`, `enter`…) ou `{"a":"text","text":…}` ; envoyé seulement si le PC annonce `display_touch` |
 
 ## Compatibilité
 
-- Ajouter un champ optionnel ou une valeur `Capability` : même version (les inconnus sont ignorés).
+- Ajouter un champ optionnel, une valeur `Capability` ou un **nouveau type de message** : même version. Depuis 0.4, un type de message inconnu est ignoré à la réception (avant, la connexion était coupée : un nouveau message n'est donc envoyé qu'à un pair qui annonce la capacité correspondante).
 - Supprimer, renommer, changer un type : incrémenter `PROTOCOL_VERSION` et documenter ici.
 - `MIN_PROTOCOL_VERSION` fixe la plus ancienne version encore acceptée ; en dehors, l'interface
   indique quel appareil mettre à jour.

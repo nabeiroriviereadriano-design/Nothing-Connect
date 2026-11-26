@@ -149,7 +149,16 @@ mod stub {
         }
         pub fn stop(&self, _app: &AppHandle) {}
         pub fn stop_if_peer(&self, _app: &AppHandle, _peer: &str) {}
-        pub fn pointer(&self, _action: nc_core::protocol::PointerAction, _x: f32, _y: f32) {}
+        pub fn pointer(
+            &self,
+            _action: nc_core::protocol::PointerAction,
+            _id: u32,
+            _x: f32,
+            _y: f32,
+        ) {
+        }
+        pub fn input(&self, _action: &nc_core::protocol::DisplayAction) {}
+        pub fn set_touch(&self, _touch: bool) {}
         pub fn request_frame(&self) {}
         pub fn set_quality(&self, _scale: f32, _jpeg_quality: u8, _fps: u32) {}
     }
@@ -771,6 +780,10 @@ mod win {
         active: Mutex<Option<Active>>,
         force_frame: Arc<AtomicBool>,
         stats: Arc<super::LiveStats>,
+        /// Toucher du téléphone : écran tactile Windows (vrai) ou souris (faux).
+        touch: AtomicBool,
+        /// Mode souris : seul le premier doigt pilote le curseur.
+        mouse_finger: Mutex<Option<u32>>,
         /// Échelle de la résolution (100 = taille réelle du téléphone), qualité JPEG, images/s.
         scale_pct: AtomicU32,
         quality: Arc<AtomicU8>,
@@ -784,6 +797,8 @@ mod win {
                 active: Mutex::new(None),
                 force_frame: Arc::new(AtomicBool::new(false)),
                 stats: Arc::new(super::LiveStats::default()),
+                touch: AtomicBool::new(true),
+                mouse_finger: Mutex::new(None),
                 scale_pct: AtomicU32::new(75),
                 quality: Arc::new(AtomicU8::new(70)),
                 fps: Arc::new(AtomicU32::new(30)),
@@ -1304,6 +1319,7 @@ mod win {
         /// Débranche le moniteur virtuel (Windows replace les fenêtres sur l'écran principal).
         pub fn stop(&self, app: &AppHandle) {
             if let Some(a) = self.stop_thread() {
+                crate::wininput::release_all();
                 remove_monitor(a.backend);
                 let st = app.state::<AppState>();
                 let node = st.node.lock().unwrap();
@@ -1335,8 +1351,26 @@ mod win {
             self.force_frame.store(true, Ordering::SeqCst);
         }
 
-        /// Toucher du téléphone → souris Windows sur le moniteur virtuel.
-        pub fn pointer(&self, action: PointerAction, x: f32, y: f32) {
+        pub fn set_touch(&self, touch: bool) {
+            if !touch {
+                crate::wininput::release_all();
+            }
+            self.touch.store(touch, Ordering::SeqCst);
+        }
+
+        /// Geste, touche ou texte venant du téléphone.
+        pub fn input(&self, action: &nc_core::protocol::DisplayAction) {
+            if self.active.lock().unwrap().is_none() {
+                return;
+            }
+            match action {
+                nc_core::protocol::DisplayAction::Key { key } => crate::wininput::key(*key),
+                nc_core::protocol::DisplayAction::Text { text } => crate::wininput::text(text),
+            }
+        }
+
+        /// Toucher du téléphone → écran tactile Windows (gestes natifs) ou souris.
+        pub fn pointer(&self, action: PointerAction, id: u32, x: f32, y: f32) {
             let adapter = match self.active.lock().unwrap().as_ref().map(|a| a.backend) {
                 Some(Backend::Own) => ADAPTER_NAME,
                 Some(Backend::Vdd) => vdd::ADAPTER,
@@ -1351,6 +1385,25 @@ mod win {
                 *r
             };
             let Some(mon) = rect else { return };
+            if self.touch.load(Ordering::SeqCst) {
+                // Pixels physiques du moniteur virtuel (application consciente du DPI).
+                let px = mon.0 + (x.clamp(0.0, 1.0) * (mon.2 - 1).max(0) as f32).round() as i32;
+                let py = mon.1 + (y.clamp(0.0, 1.0) * (mon.3 - 1).max(0) as f32).round() as i32;
+                if crate::wininput::touch(action, id, px, py) {
+                    return;
+                }
+                // Injection tactile refusée par Windows : souris.
+                self.touch.store(false, Ordering::SeqCst);
+            }
+            {
+                let mut f = self.mouse_finger.lock().unwrap();
+                match action {
+                    PointerAction::Down if f.is_none() => *f = Some(id),
+                    _ if *f != Some(id) => return,
+                    PointerAction::Up | PointerAction::Cancel => *f = None,
+                    _ => {}
+                }
+            }
             let desk = unsafe {
                 (
                     GetSystemMetrics(SM_XVIRTUALSCREEN),

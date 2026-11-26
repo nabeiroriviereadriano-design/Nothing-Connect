@@ -58,6 +58,8 @@ pub enum Capability {
     AudioPlayback,
     /// Le PC peut créer un écran étendu (pilote installé) / le téléphone peut l'afficher.
     ExtendedDisplay,
+    /// Le PC accepte le toucher multipoint et les gestes/le clavier de l'écran étendu (`display_input`).
+    DisplayTouch,
     #[serde(other)]
     Unknown,
 }
@@ -146,6 +148,45 @@ pub enum InputEvent {
     Text {
         text: String,
     },
+}
+
+/// Touche ou geste envoyé par le téléphone pendant l'écran étendu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplayKey {
+    /// Geste « retour » d'Android : page précédente (navigateur, Explorateur).
+    Back,
+    /// Trois doigts vers le haut : vue des tâches.
+    TaskView,
+    /// Trois doigts vers le bas : bureau.
+    ShowDesktop,
+    /// Trois doigts vers la gauche / la droite : application précédente / suivante.
+    PrevApp,
+    NextApp,
+    /// Quatre doigts vers la gauche / la droite : bureau virtuel précédent / suivant.
+    PrevDesktop,
+    NextDesktop,
+    /// Affiche ou masque le clavier tactile de Windows.
+    TouchKeyboard,
+    Backspace,
+    Delete,
+    Enter,
+    Tab,
+    Escape,
+    Left,
+    Right,
+    Up,
+    Down,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Saisie depuis le téléphone vers le PC (écran étendu).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "a", rename_all = "snake_case")]
+pub enum DisplayAction {
+    Key { key: DisplayKey },
+    Text { text: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -455,11 +496,41 @@ pub enum Message {
         x: f32,
         y: f32,
     },
+    /// Téléphone → PC : geste, touche ou texte pendant l'écran étendu (si le PC annonce
+    /// la capacité `display_touch`).
+    DisplayInput(DisplayAction),
+    /// Message d'une version plus récente : ignoré au lieu de couper la connexion.
+    #[serde(other)]
+    Unknown,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_message_type_is_tolerated() {
+        let m: Message =
+            serde_json::from_str(r#"{"t":"something_from_the_future","x":1}"#).unwrap();
+        assert_eq!(m, Message::Unknown);
+    }
+
+    #[test]
+    fn display_input_json_shape() {
+        let m = Message::DisplayInput(DisplayAction::Key {
+            key: DisplayKey::TaskView,
+        });
+        assert_eq!(
+            serde_json::to_string(&m).unwrap(),
+            r#"{"t":"display_input","a":"key","key":"task_view"}"#
+        );
+        let t: Message =
+            serde_json::from_str(r#"{"t":"display_input","a":"text","text":"é"}"#).unwrap();
+        assert_eq!(
+            t,
+            Message::DisplayInput(DisplayAction::Text { text: "é".into() })
+        );
+    }
 
     #[test]
     fn unknown_capability_is_tolerated() {

@@ -411,8 +411,7 @@ impl Node {
 
     /// Variante JSON (liaisons Kotlin / TypeScript) : le message est validé avant envoi.
     pub fn send_json(&self, peer_id: &str, json: &str) -> Result<()> {
-        let msg: Message = serde_json::from_str(json)?;
-        self.send(peer_id, msg)
+        self.send(peer_id, parse_message(json)?)
     }
 
     /// Envoie un message à tous les pairs connectés (ex. téléphone → PC).
@@ -758,5 +757,16 @@ async fn upgrade_to_usb(inner: &Arc<Inner>, pc: &DeviceRecord) {
     let usb_ready = matches!(probe.await, Ok(Ok(_)));
     if usb_ready && connect_to(inner, &key, usb_addr()).await.is_ok() {
         tracing::info!("liaison basculée sur USB");
+    }
+}
+
+/// Message de contrôle écrit par une plateforme (JSON) ; un type inconnu est refusé ici
+/// (il n'est toléré qu'à la réception, venant d'une version plus récente).
+pub fn parse_message(json: &str) -> Result<Message> {
+    match serde_json::from_str(json)? {
+        Message::Unknown => Err(CoreError::Json(
+            <serde_json::Error as serde::de::Error>::custom("type de message inconnu"),
+        )),
+        m => Ok(m),
     }
 }

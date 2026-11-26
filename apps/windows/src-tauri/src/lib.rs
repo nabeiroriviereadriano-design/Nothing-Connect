@@ -13,6 +13,8 @@ mod media;
 mod secrets;
 mod sink;
 mod tray;
+#[cfg(windows)]
+mod wininput;
 
 use nc_core::protocol::{Capability, DeviceInfo, Platform};
 use nc_core::{Node, NodeConfig, Role, Settings};
@@ -48,7 +50,13 @@ fn device_info() -> DeviceInfo {
         model: None,
         os_version: Some(std::env::consts::OS.into()),
         app_version: env!("CARGO_PKG_VERSION").into(),
-        capabilities: vec![Capability::FileTransfer, Capability::ShareText],
+        capabilities: vec![
+            Capability::FileTransfer,
+            Capability::ShareText,
+            Capability::Clipboard,
+            Capability::ExtendedDisplay,
+            Capability::DisplayTouch,
+        ],
     }
 }
 

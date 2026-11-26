@@ -9,12 +9,14 @@ export interface DisplayPrefs {
   /** Images par seconde ; 0 = fréquence maximale du téléphone. */
   fps: number;
   portrait: boolean;
+  /** Toucher du téléphone : écran tactile Windows (gestes) ou souris. */
+  touch: boolean;
 }
 export interface MirrorPrefs { maxSize: number; bitrate: number; withAudio: boolean }
 export interface Prefs { display: DisplayPrefs; mirror: MirrorPrefs }
 
 const DEFAULTS: Prefs = {
-  display: { scale: 0.75, quality: 70, fps: 0, portrait: false },
+  display: { scale: 0.75, quality: 70, fps: 0, portrait: false, touch: true },
   mirror: { maxSize: 1280, bitrate: 8_000_000, withAudio: true },
 };
 

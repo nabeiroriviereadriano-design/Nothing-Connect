@@ -110,7 +110,22 @@
         { value: false, label: "Paysage" },
         { value: true, label: "Portrait" },
       ]} />
+      <Segmented label="Toucher" value={p.touch} onchange={(v) => display.change("touch", v)} options={[
+        { value: true, label: "Tactile", hint: "Comme un écran tactile : défiler, zoomer, appui long, gestes à 3 et 4 doigts" },
+        { value: false, label: "Souris", hint: "Un doigt déplace et clique comme une souris" },
+      ]} />
     </div>
+    {#if p.touch}
+      <details class="help">
+        <summary class="small">Gestes sur le téléphone</summary>
+        <ul class="small muted">
+          <li>Glisser : défiler. Pincer : zoomer. Appui long : clic droit.</li>
+          <li>3 doigts vers le haut : vue des tâches. Vers le bas : bureau.</li>
+          <li>3 doigts à gauche ou à droite : application suivante ou précédente. 4 doigts : bureau virtuel.</li>
+          <li>Retour d'Android : page précédente. Bouton flottant : clavier du téléphone, clavier de Windows, débrancher.</li>
+        </ul>
+      </details>
+    {/if}
     <p class="muted small foot">
       <span>Réglages enregistrés automatiquement.{#if display.active}{" "}Qualité et images/s s'appliquent tout de suite ; définition et orientation au prochain branchement.{/if}</span>
       {#if st.backend === "nothing-connect"}<button class="link" disabled={display.busy || display.active} onclick={() => display.setup("uninstall")}>Retirer le pilote</button>{/if}
@@ -133,6 +148,9 @@
   .settings { display: flex; flex-wrap: wrap; gap: 18px 28px; }
   .foot { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
   .driver { display: flex; flex-direction: column; gap: 12px; }
+  .help summary { cursor: pointer; color: var(--muted); width: fit-content; }
+  .help summary:hover { color: var(--white); }
+  .help ul { margin: 10px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
   .wrap { flex-wrap: wrap; }
   .warn { color: var(--red); }
   .link { background: none; border: none; padding: 0; color: var(--white); text-decoration: underline; text-underline-offset: 3px; font-size: inherit; }

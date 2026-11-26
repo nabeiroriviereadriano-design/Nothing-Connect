@@ -17,7 +17,7 @@ pub use nc_security::{MemoryStore, SecretStore, SecurityError};
 pub use nc_storage::{DeviceRecord, NotificationRecord, TransferRecord};
 pub use nc_transfer::ConflictPolicy;
 pub use nc_transport::DEFAULT_PORT;
-pub use node::{Node, NodeConfig, PairingInfo, PeerLink, Role};
+pub use node::{parse_message, Node, NodeConfig, PairingInfo, PeerLink, Role};
 pub use settings::Settings;
 
 use thiserror::Error;

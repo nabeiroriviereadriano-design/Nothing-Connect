@@ -214,7 +214,7 @@ impl NcNode {
     }
     /// Envoie un message JSON à tous les PC connectés ; renvoie le nombre de destinataires.
     pub fn broadcast_json(&self, json: String) -> R<u32> {
-        let msg = serde_json::from_str(&json)?;
+        let msg = nc_core::parse_message(&json)?;
         Ok(self.node.lock().unwrap().broadcast(msg) as u32)
     }
     pub fn send_files(&self, peer_id: String, inputs: Vec<NamedInput>) -> R<String> {

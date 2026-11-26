@@ -203,10 +203,10 @@ export const api = {
   androidInstall: (serial: string | null) => invoke<string>("android_install", { serial }),
   displayStatus: () => invoke<DisplayStatus>("display_status"),
   displaySetup: (action: "install" | "uninstall" | "enable-testsigning" | "install-vdd") => invoke<string>("display_setup", { action }),
-  displayStart: (peerId: string, scale: number, quality: number, fps: number, portrait: boolean) =>
-    invoke<void>("display_start", { peerId, scale, quality, fps, portrait }),
+  displayStart: (peerId: string, scale: number, quality: number, fps: number, portrait: boolean, touch: boolean) =>
+    invoke<void>("display_start", { peerId, scale, quality, fps, portrait, touch }),
   displayStop: () => invoke<void>("display_stop"),
-  displayTune: (scale: number, quality: number, fps: number) => invoke<void>("display_tune", { scale, quality, fps }),
+  displayTune: (scale: number, quality: number, fps: number, touch: boolean) => invoke<void>("display_tune", { scale, quality, fps, touch }),
   uiPrefsGet: () => invoke<Record<string, unknown>>("ui_prefs_get"),
   uiPrefsSet: (prefs: object) => invoke<void>("ui_prefs_set", { prefs }),
 };

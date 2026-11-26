@@ -24,8 +24,21 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowManager
+import android.graphics.drawable.GradientDrawable
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
+import android.util.TypedValue
+import android.view.KeyEvent
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -74,6 +87,22 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
     private val dst = Rect()
     @Volatile private var image = RectF()
 
+    // --- Gestes, clavier, menu
+    /** Le PC (0.3.2+) accepte le toucher multipoint, les gestes et le clavier. */
+    private var pcTouch = false
+    private var gesture = false
+    private var gestureFingers = 0
+    private var gestureStartX = 0f
+    private var gestureStartY = 0f
+    private var gestureX = 0f
+    private var gestureY = 0f
+    private lateinit var keyboard: EditText
+    private lateinit var fab: TextView
+    private var menu: LinearLayout? = null
+    private var resetting = false
+    /** Toucher qui a fermé le menu : il n'est pas envoyé au PC. */
+    private var swallow = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Streams.clearRequestNotification(this)
@@ -91,7 +120,17 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
         view.holder.addCallback(this)
         root.addView(view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER))
         root.setOnTouchListener { _, e -> onTouch(e); true }
+        pcTouch = Core.devices.value.firstOrNull { it.id == peer }?.capabilities?.contains("display_touch") == true
+        if (pcTouch) addControls()
         setContentView(root)
+        // Le clavier du téléphone s'affiche par-dessus sans redimensionner l'écran étendu.
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                // Comme sur un téléphone : page précédente dans Windows. Quitter : bouton flottant.
+                if (pcTouch) sendKey("back") else finish()
+            }
+        })
         WindowInsetsControllerCompat(window, root).apply {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -322,7 +361,185 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
 
     // ------------------------------------------------------------------ toucher
 
+    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
+
+    private fun sendKey(key: String) {
+        Core.send(peer, JSONObject().put("t", "display_input").put("a", "key").put("key", key))
+    }
+
+    private fun sendText(text: String) {
+        Core.send(peer, JSONObject().put("t", "display_input").put("a", "text").put("text", text))
+    }
+
+    private fun centroid(e: MotionEvent): Pair<Float, Float> {
+        var x = 0f
+        var y = 0f
+        val up = if (e.actionMasked == MotionEvent.ACTION_POINTER_UP) e.actionIndex else -1
+        var n = 0
+        for (i in 0 until e.pointerCount) {
+            if (i == up) continue
+            x += e.getX(i); y += e.getY(i); n++
+        }
+        return if (n == 0) gestureX to gestureY else (x / n) to (y / n)
+    }
+
+    /**
+     * Gestes à 3 et 4 doigts reconnus sur le téléphone (Windows ne les gère pas toujours pour
+     * un écran ajouté) : dès le 3e doigt, les contacts déjà envoyés sont annulés et le geste
+     * est traduit en raccourci Windows quand les doigts se lèvent.
+     */
+    private fun handleGesture(e: MotionEvent): Boolean {
+        if (!pcTouch) return false
+        when (e.actionMasked) {
+            MotionEvent.ACTION_POINTER_DOWN -> if (!gesture && e.pointerCount >= 3) {
+                gesture = true
+                Core.send(peer, JSONObject().put("t", "display_pointer").put("action", "cancel").put("pointer", 0).put("x", 0.0).put("y", 0.0))
+                val (x, y) = centroid(e)
+                gestureStartX = x; gestureStartY = y; gestureX = x; gestureY = y
+            }
+            MotionEvent.ACTION_MOVE -> if (gesture) {
+                val (x, y) = centroid(e)
+                gestureX = x; gestureY = y
+            }
+        }
+        if (!gesture) return false
+        gestureFingers = maxOf(gestureFingers, e.pointerCount)
+        if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
+            val dx = (gestureX - gestureStartX) / root.width.coerceAtLeast(1)
+            val dy = (gestureY - gestureStartY) / root.height.coerceAtLeast(1)
+            if (e.actionMasked == MotionEvent.ACTION_UP && maxOf(kotlin.math.abs(dx), kotlin.math.abs(dy)) > 0.08f) {
+                val four = gestureFingers >= 4
+                val key = if (kotlin.math.abs(dy) > kotlin.math.abs(dx)) {
+                    if (dy < 0) "task_view" else "show_desktop"
+                } else if (dx < 0) {
+                    if (four) "next_desktop" else "next_app"
+                } else {
+                    if (four) "prev_desktop" else "prev_app"
+                }
+                sendKey(key)
+            }
+            gesture = false
+            gestureFingers = 0
+        }
+        return true
+    }
+
+    // ------------------------------------------------------------------ bouton flottant, clavier
+
+    private fun pill(text: String, onClick: () -> Unit) = TextView(this).apply {
+        this.text = text
+        setTextColor(Color.WHITE)
+        textSize = 15f
+        val p = dp(14f).toInt()
+        setPadding(p, dp(10f).toInt(), p, dp(10f).toInt())
+        background = GradientDrawable().apply { cornerRadius = dp(22f); setColor(Color.argb(235, 30, 30, 30)) }
+        setOnClickListener { onClick() }
+    }
+
+    private fun addControls() {
+        // Clavier du téléphone : champ invisible ; chaque caractère tapé part vers le PC.
+        keyboard = EditText(this).apply {
+            alpha = 0f
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_ACTION_SEND
+            setText(SENTINEL)
+            setSelection(SENTINEL.length)
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(s: Editable?) {
+                    if (resetting || s == null) return
+                    val t = s.toString()
+                    when {
+                        t.length > SENTINEL.length && t.startsWith(SENTINEL) -> sendText(t.substring(SENTINEL.length))
+                        t.length < SENTINEL.length -> repeat(SENTINEL.length - t.length) { sendKey("backspace") }
+                        t != SENTINEL -> sendText(t.replace(SENTINEL, ""))
+                    }
+                    resetting = true
+                    setText(SENTINEL)
+                    setSelection(SENTINEL.length)
+                    resetting = false
+                }
+            })
+            setOnEditorActionListener { _, _, _ -> sendKey("enter"); true }
+            setOnKeyListener { _, code, ev ->
+                if (ev.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                when (code) {
+                    KeyEvent.KEYCODE_ENTER -> { sendKey("enter"); true }
+                    KeyEvent.KEYCODE_DEL -> { sendKey("backspace"); true }
+                    else -> false
+                }
+            }
+        }
+        root.addView(keyboard, FrameLayout.LayoutParams(1, 1, Gravity.TOP or Gravity.START))
+
+        // Bouton flottant déplaçable : menu clavier / clavier Windows / débrancher.
+        fab = TextView(this).apply {
+            text = "•••"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            alpha = 0.55f
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.argb(200, 20, 20, 20)); setStroke(dp(1f).toInt(), Color.argb(120, 255, 255, 255)) }
+            contentDescription = "Menu de l'écran étendu"
+        }
+        val size = dp(48f).toInt()
+        root.addView(fab, FrameLayout.LayoutParams(size, size, Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(10f).toInt() })
+        var downY = 0f
+        var startT = 0f
+        var moved = false
+        fab.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { downY = e.rawY; startT = v.translationY; moved = false }
+                MotionEvent.ACTION_MOVE -> {
+                    val d = e.rawY - downY
+                    if (kotlin.math.abs(d) > dp(8f)) moved = true
+                    if (moved) {
+                        val lim = root.height / 2f - v.height
+                        v.translationY = (startT + d).coerceIn(-lim, lim)
+                    }
+                }
+                MotionEvent.ACTION_UP -> if (!moved) toggleMenu()
+            }
+            true
+        }
+    }
+
+    private fun toggleMenu() {
+        menu?.let { root.removeView(it); menu = null; return }
+        val m = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val gap = dp(8f).toInt()
+            fun add(v: View) = addView(v, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = gap; gravity = Gravity.END })
+            add(pill("Clavier du téléphone") { closeMenu(); showKeyboard() })
+            add(pill("Clavier de Windows") { closeMenu(); sendKey("touch_keyboard") })
+            add(pill("Débrancher l'écran") { closeMenu(); finish() })
+            translationY = fab.translationY
+        }
+        root.addView(m, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(68f).toInt() })
+        menu = m
+    }
+
+    private fun closeMenu() {
+        menu?.let { root.removeView(it) }
+        menu = null
+    }
+
+    private fun showKeyboard() {
+        keyboard.requestFocus()
+        keyboard.post { getSystemService(InputMethodManager::class.java).showSoftInput(keyboard, 0) }
+    }
+
     private fun onTouch(e: MotionEvent) {
+        if (menu != null && e.actionMasked == MotionEvent.ACTION_DOWN) {
+            closeMenu()
+            swallow = true
+        }
+        if (swallow) {
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) swallow = false
+            return
+        }
+        if (handleGesture(e)) return
         // Coordonnées rapportées à l'image affichée (jamais aux bandes noires).
         val vx = view.x
         val vy = view.y
@@ -356,6 +573,8 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
         private const val EXTRA_PEER = "peer"
         private const val EXTRA_PARAMS = "params"
         private val ANNOUNCE = Any()
+        /** Contenu permanent du champ caché : un effacement se voit même quand rien n'a été tapé. */
+        private const val SENTINEL = "  "
 
         @Volatile
         private var instance: DisplayActivity? = null

@@ -559,8 +559,10 @@ fn display_start(
     quality: u8,
     fps: u32,
     portrait: bool,
+    touch: Option<bool>,
 ) -> R<()> {
     s.media.display.set_quality(scale, quality, fps);
+    s.media.display.set_touch(touch.unwrap_or(true));
     let params = nc_core::protocol::StreamParams {
         codec: Some("jpeg".into()),
         portrait: Some(portrait),
@@ -582,8 +584,11 @@ fn display_start(
 
 /// Qualité et fréquence modifiées pendant une session : appliquées sans débrancher l'écran.
 #[tauri::command]
-fn display_tune(s: State<AppState>, scale: f32, quality: u8, fps: u32) {
+fn display_tune(s: State<AppState>, scale: f32, quality: u8, fps: u32, touch: Option<bool>) {
     s.media.display.set_quality(scale, quality, fps);
+    if let Some(t) = touch {
+        s.media.display.set_touch(t);
+    }
 }
 
 #[tauri::command]

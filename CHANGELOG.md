@@ -1,5 +1,13 @@
 # Notes de version
 
+## 0.4.0
+
+- **Écran étendu tactile** : le téléphone devient un vrai écran tactile pour Windows (toucher multipoint) : glisser pour défiler, pincer pour zoomer, appui long pour le clic droit, déplacer une fenêtre par sa barre de titre. Le mode souris reste disponible (réglage « Toucher »).
+- **Gestes façon smartphone** : 3 doigts vers le haut = vue des tâches, vers le bas = bureau, à gauche/droite = application suivante/précédente ; 4 doigts à gauche/droite = bureau virtuel.
+- **Retour d'Android** = page précédente dans Windows (l'écran ne se ferme plus par erreur).
+- **Bouton flottant** sur le téléphone (déplaçable) : clavier du téléphone (ce qui est tapé s'écrit sur le PC), clavier tactile de Windows, débrancher l'écran.
+- Protocole plus tolérant : un message d'une version plus récente est ignoré au lieu de couper la connexion.
+
 ## 0.3.1
 
 - Écran étendu : Windows plaçait souvent l'écran virtuel à 60 Hz même pour un téléphone à 90 ou 120 Hz, ce qui plafonnait l'affichage à 60 images/s. La fréquence du téléphone est maintenant imposée et vérifiée ; le compteur « Hz » de l'accueil affiche la fréquence réellement appliquée par Windows.

@@ -22,7 +22,14 @@ import uniffi.nc_ffi.StreamListener
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 
-data class PcDevice(val id: String, val name: String, val appVersion: String?, val lastSeen: Long?, val autoAccept: Boolean)
+data class PcDevice(
+    val id: String,
+    val name: String,
+    val appVersion: String?,
+    val lastSeen: Long?,
+    val autoAccept: Boolean,
+    val capabilities: Set<String> = emptySet(),
+)
 
 data class TransferUi(
     val id: String,
@@ -160,6 +167,7 @@ object Core : EventListener, StreamListener {
                     appVersion = it.optString("app_version").takeIf { v -> v.isNotBlank() && v != "null" },
                     lastSeen = if (it.isNull("last_seen")) null else it.getLong("last_seen"),
                     autoAccept = it.optBoolean("auto_accept"),
+                    capabilities = it.optJSONArray("capabilities")?.let { a -> (0 until a.length()).map { i -> a.getString(i) }.toSet() } ?: emptySet(),
                 )
             }
     }
@@ -231,6 +239,7 @@ object Core : EventListener, StreamListener {
                 }
                 incoming.update { l -> l.filter { it.id != id } }
             }
+            "device_updated" -> refreshDevices()
             "error" -> messages.tryEmit(e.getString("message"))
         }
     }

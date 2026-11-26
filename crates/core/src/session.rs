@@ -451,6 +451,11 @@ async fn read_loop(inner: &Arc<Inner>, s: &Arc<Session>, r: &mut Reader) -> Stri
         let frame = match frame {
             Err(_) => return "aucune réponse (délai dépassé)".into(),
             Ok(Err(TransportError::Closed)) => return "connexion fermée".into(),
+            // Message mal formé (version différente) : ignoré, la trame chiffrée était valide.
+            Ok(Err(TransportError::Protocol(nc_protocol::ProtocolError::Json(e)))) => {
+                tracing::warn!("message de contrôle illisible ignoré : {e}");
+                continue;
+            }
             Ok(Err(e)) => return e.to_string(),
             Ok(Ok(f)) => f,
         };
@@ -582,12 +587,15 @@ fn dispatch(inner: &Arc<Inner>, s: &Arc<Session>, m: Message) -> Option<String> 
                 });
             }
         }
+        // Message d'une version plus récente : ignoré.
+        Message::Unknown => tracing::debug!("message inconnu ignoré"),
         // Flux temps réel et contrôle : traités par la plateforme.
         m @ (Message::StreamRequest { .. }
         | Message::StreamStart { .. }
         | Message::StreamStop { .. }
         | Message::StreamKeyframe { .. }
         | Message::Input(_)
+        | Message::DisplayInput(_)
         | Message::DisplayPointer { .. }) => inner.emit(Event::Request {
             peer_id: peer,
             message: m,

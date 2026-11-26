@@ -130,11 +130,12 @@ impl EventSink for TauriSink {
                         pointer,
                     },
                 ..
-            } => {
-                if *pointer == 0 {
-                    self.media.display.pointer(*action, *x, *y);
-                }
-            }
+            } => self.media.display.pointer(*action, *pointer, *x, *y),
+            // Gestes, touches et texte de l'écran étendu.
+            Event::Request {
+                message: nc_core::protocol::Message::DisplayInput(action),
+                ..
+            } => self.media.display.input(action),
             Event::PeerDisconnected { peer_id, .. } | Event::DeviceRemoved { peer_id } => {
                 self.media.display.stop_if_peer(&self.app, peer_id);
                 self.media.capture.lock().unwrap().take();
