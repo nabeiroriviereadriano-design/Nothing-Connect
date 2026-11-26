@@ -1,0 +1,61 @@
+:root {
+  --black: #000000;
+  --white: #ffffff;
+  --surface: #161616;
+  --surface-2: #1f1f1f;
+  --line: #2e2e2e;
+  --muted: #8e8e8e;
+  --red: #d71921;
+  --dot: "Doto", "Space Grotesk", monospace;
+  --ui: "Space Grotesk", system-ui, sans-serif;
+  --r-big: 28px;
+  --r-mid: 16px;
+  --r-pill: 999px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--black); color: var(--white); }
+body { font: 400 15px/1.5 var(--ui); -webkit-font-smoothing: antialiased; }
+#app { height: 100%; }
+h1, h2, h3 { margin: 0; font-weight: 500; letter-spacing: -0.01em; }
+h1 { font-size: 30px; line-height: 1.15; }
+h2 { font-size: 19px; line-height: 1.3; }
+h3 { font-size: 15px; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.dot { font-family: var(--dot); font-weight: 900; letter-spacing: 0.02em; }
+button {
+  font: 500 14px/1 var(--ui);
+  color: var(--white);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 10px 16px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--white); }
+button:disabled { opacity: 0.4; cursor: default; }
+button.primary { background: var(--white); color: var(--black); border-color: var(--white); }
+button.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 50%, transparent); }
+button.ghost { background: transparent; }
+button.icon { padding: 8px 10px; }
+:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
+input[type="text"], input[type="search"], input[type="number"], textarea, select {
+  font: 400 14px/1.4 var(--ui);
+  color: var(--white);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  width: 100%;
+}
+input:focus, textarea:focus, select:focus { border-color: var(--white); outline: none; }
+.panel { background: var(--surface); border-radius: var(--r-big); padding: 22px; }
+.row { display: flex; align-items: center; gap: 12px; }
+.grow { flex: 1; min-width: 0; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+.idle { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

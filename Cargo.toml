@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/protocol", "crates/security", "crates/pairing", "crates/storage", "crates/transport", "crates/transfer", "crates/core", "crates/ffi"]
+members = ["crates/*", "apps/windows/src-tauri"]
+# Le cœur se teste sans les dépendances système de Tauri.
+default-members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"

@@ -88,6 +88,8 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (device_id, package)
     );
     "#,
+    // 2 — capacités annoncées par l'appareil (JSON)
+    r#"ALTER TABLE devices ADD COLUMN capabilities TEXT NOT NULL DEFAULT '[]';"#,
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -108,6 +110,7 @@ pub struct DeviceRecord {
     pub last_seen: Option<i64>,
     pub last_addr: Option<String>,
     pub auto_accept: bool,
+    pub capabilities: Vec<nc_protocol::Capability>,
 }
 
 impl DeviceRecord {
@@ -207,13 +210,13 @@ impl Store {
         {
             let c = self.conn.lock().unwrap();
             c.execute(
-                "INSERT INTO devices (id, public_key, name, platform, manufacturer, model, os_version, app_version, paired_at, last_seen, last_addr)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)
-                 ON CONFLICT(id) DO UPDATE SET name=excluded.name, platform=excluded.platform,
+                "INSERT INTO devices (id, public_key, name, platform, manufacturer, model, os_version, app_version, paired_at, last_seen, last_addr, capabilities)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11)
+                 ON CONFLICT(id) DO UPDATE SET name=excluded.name, platform=excluded.platform, capabilities=excluded.capabilities,
                    manufacturer=excluded.manufacturer, model=excluded.model, os_version=excluded.os_version,
                    app_version=excluded.app_version, last_seen=excluded.last_seen,
                    last_addr=COALESCE(excluded.last_addr, devices.last_addr)",
-                params![id, public_key, info.name, platform_str(info.platform), info.manufacturer, info.model, info.os_version, info.app_version, now, addr],
+                params![id, public_key, info.name, platform_str(info.platform), info.manufacturer, info.model, info.os_version, info.app_version, now, addr, serde_json::to_string(&info.capabilities)?],
             )?;
         }
         Ok(self.device(&id)?.expect("inséré"))
@@ -497,6 +500,7 @@ fn row_device(r: &rusqlite::Row) -> rusqlite::Result<DeviceRecord> {
         last_seen: r.get("last_seen")?,
         last_addr: r.get("last_addr")?,
         auto_accept: r.get("auto_accept")?,
+        capabilities: serde_json::from_str(&r.get::<_, String>("capabilities")?).unwrap_or_default(),
     })
 }
 
@@ -546,7 +550,7 @@ mod tests {
             model: Some("A065".into()),
             os_version: Some("14".into()),
             app_version: "0.1.0".into(),
-            capabilities: vec![],
+            capabilities: vec![nc_protocol::Capability::Ring],
         }
     }
 
@@ -563,6 +567,24 @@ mod tests {
         assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
         assert_eq!(s.devices().unwrap().len(), 1);
         assert_eq!(s.get_setting::<String>("theme").unwrap().as_deref(), Some("dark"));
+    }
+
+    #[test]
+    fn migrates_v1_database_without_losing_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("nc.db");
+        {
+            // Base telle que créée par la version 0.1 (schéma 1 seulement).
+            let c = Connection::open(&p).unwrap();
+            c.execute_batch(MIGRATIONS[0]).unwrap();
+            c.pragma_update(None, "user_version", 1).unwrap();
+            c.execute("INSERT INTO devices (id, public_key, name, platform, paired_at) VALUES ('aa', x'aa', 'Ancien', 'android', 1)", []).unwrap();
+        }
+        let s = Store::open(&p).unwrap();
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
+        let d = s.device("aa").unwrap().unwrap();
+        assert_eq!(d.name, "Ancien");
+        assert!(d.capabilities.is_empty());
     }
 
     #[test]
