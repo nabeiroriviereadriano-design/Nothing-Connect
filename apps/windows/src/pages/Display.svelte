@@ -73,22 +73,22 @@
       <div class="row"><span class={st.installed ? "live" : "idle"}></span>
         <span>{st.backend === "nothing-connect" ? "Pilote NOTHING CONNECT installé" : st.backend === "vdd" ? "Pilote Virtual Display Driver installé" : "Aucun pilote d'écran"}</span></div>
       {#if !st.installed}
-        <div class="choice">
-          <h3>Virtual Display Driver (recommandé)</h3>
-          <p class="muted small">Pilote d'écran virtuel libre (licence MIT) et déjà signé : il s'installe sans mode test ni réglage du BIOS. Téléchargé depuis son dépôt officiel par winget ; Windows demande une autorisation.</p>
-          <div><button class="primary" disabled={busy} onclick={() => setup("install-vdd")}>{busy ? "Installation…" : "Installer Virtual Display Driver"}</button></div>
-        </div>
         {#if st.setup_available}
           <div class="choice">
-            <h3>Pilote NOTHING CONNECT</h3>
-            <p class="muted small">Pilote intégré à l'application. Windows peut refuser de le charger tant qu'il n'est pas signé par Microsoft.</p>
-            <div><button disabled={busy} onclick={() => setup("install")}>Installer le pilote intégré</button></div>
+            <h3>Pilote NOTHING CONNECT (recommandé)</h3>
+            <p class="muted small">Fourni avec l'application, sans téléchargement ni mode test : il fonctionne en mode utilisateur et s'installe avec son propre certificat. Windows demande une autorisation administrateur.</p>
+            <div><button class="primary" disabled={busy} onclick={() => setup("install")}>{busy ? "Installation…" : "Installer le pilote"}</button></div>
             {#if ownFailed && !st.testsigning}
-              <p class="muted small">Windows exige une signature Microsoft pour ce pilote. Utilisez Virtual Display Driver ci-dessus, ou activez le mode signature de test (redémarrage, Secure Boot désactivé).</p>
+              <p class="muted small">Ce PC refuse le pilote intégré. Installez Virtual Display Driver ci-dessous, ou activez le mode signature de test (redémarrage, Secure Boot désactivé).</p>
               <div><button class="ghost" disabled={busy} onclick={enableTestSigning}>Activer la signature de test</button></div>
             {/if}
           </div>
         {/if}
+        <div class="choice">
+          <h3>Autre possibilité : Virtual Display Driver</h3>
+          <p class="muted small">Pilote d'écran virtuel libre (licence MIT) signé par son auteur, téléchargé depuis son dépôt officiel par winget. Utile si Windows refuse le pilote intégré.</p>
+          <div><button disabled={busy} onclick={() => setup("install-vdd")}>Installer Virtual Display Driver</button></div>
+        </div>
         {#if needReboot}<p class="warn">Redémarrez le PC pour terminer l'installation.</p>{/if}
       {:else if st.backend === "nothing-connect"}
         <div><button class="ghost small" disabled={busy || !!st.active_peer} onclick={() => setup("uninstall")}>Retirer le pilote</button></div>

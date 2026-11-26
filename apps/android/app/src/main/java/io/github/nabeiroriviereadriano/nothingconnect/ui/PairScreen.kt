@@ -37,7 +37,10 @@ import com.journeyapps.barcodescanner.ScanOptions
 import io.github.nabeiroriviereadriano.nothingconnect.core.Core
 import io.github.nabeiroriviereadriano.nothingconnect.core.PairingUi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import androidx.activity.result.contract.ActivityResultContracts
+import io.github.nabeiroriviereadriano.nothingconnect.core.BleScan
 import uniffi.nc_ffi.DiscoveredPc
 import uniffi.nc_ffi.discoverPcs
 
@@ -61,12 +64,25 @@ fun PairScreen(onDone: () -> Unit, onCancel: (() -> Unit)?) {
         }
     }
 
+    var blePerm by remember { mutableStateOf(BleScan.permitted(ctx)) }
+    val bleAsk = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        blePerm = ok
+        if (ok) round++
+    }
     LaunchedEffect(round) {
         searching = true
-        found = withContext(Dispatchers.IO) {
-            val lock = (ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).createMulticastLock("nc-pair")
-            lock.acquire()
-            try { discoverPcs(2500u) } finally { lock.release() }
+        found = coroutineScope {
+            val wifi = async(Dispatchers.IO) {
+                val lock = (ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).createMulticastLock("nc-pair")
+                lock.acquire()
+                try { discoverPcs(2500u) } finally { lock.release() }
+            }
+            // Bluetooth LE : utile quand le Wi-Fi bloque la découverte (réseaux d'entreprise, hotspots).
+            val ble = async { BleScan.scan(ctx, 3000) }
+            val viaWifi = wifi.await()
+            val extra = ble.await().filter { b -> viaWifi.none { it.fingerprint == b.fingerprint } }
+                .map { DiscoveredPc("PC trouvé en Bluetooth", it.fingerprint, 0u, listOf(it.addr)) }
+            viaWifi + extra
         }
         searching = false
     }
@@ -118,6 +134,9 @@ fun PairScreen(onDone: () -> Unit, onCancel: (() -> Unit)?) {
                 }
             }
             if (!searching) TextButton({ round++ }) { Text("Rechercher à nouveau") }
+            if (android.os.Build.VERSION.SDK_INT >= 31 && !blePerm) {
+                TextButton({ bleAsk.launch(android.Manifest.permission.BLUETOOTH_SCAN) }) { Text("Chercher aussi en Bluetooth") }
+            }
 
             OutlinedTextField(
                 value = manualAddr, onValueChange = { manualAddr = it.trim(); chosen = null },

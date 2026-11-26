@@ -15,7 +15,9 @@ object Notifs {
     const val CH_SERVICE = "service"
     const val CH_TRANSFER = "transfer"
     const val CH_INCOMING = "incoming"
+    const val CH_STREAM = "stream"
     const val ID_SERVICE = 1
+    const val ID_MIRROR = 2
 
     fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -28,6 +30,9 @@ object Notifs {
         })
         nm.createNotificationChannel(NotificationChannel(CH_INCOMING, "Demandes et réceptions", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Fichiers à accepter, liens et textes reçus du PC."
+        })
+        nm.createNotificationChannel(NotificationChannel(CH_STREAM, "Écran et son partagés", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Indique que l'écran ou le son du téléphone est diffusé vers le PC."
         })
     }
 

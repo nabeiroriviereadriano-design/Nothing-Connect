@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Réseau local (aucun serveur Internet ; Internet sert seulement à vérifier les mises à jour). -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -20,6 +21,16 @@
     <!-- Scan du QR code d'association. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Miroir de l'écran et son du téléphone vers le PC (accord demandé à chaque diffusion). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Exigée par Android pour capturer le son des applications (jamais le micro). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Découverte du PC en Bluetooth LE (Android 12+), sans localisation. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <!-- Liste des applications lançables (filtre des notifications), sans QUERY_ALL_PACKAGES. -->
     <queries>
@@ -68,6 +79,63 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <!-- Accord de diffusion (fenêtre système Android). -->
+        <activity
+            android:name=".stream.ProjectionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.NothingConnect.Translucent" />
+
+        <!-- Écran étendu du PC. -->
+        <activity
+            android:name=".stream.DisplayActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density"
+            android:theme="@style/Theme.NothingConnect" />
+
+        <!-- Envoi du presse-papiers (lecture permise uniquement au premier plan). -->
+        <activity
+            android:name=".stream.ClipboardSendActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:noHistory="true"
+            android:theme="@style/Theme.NothingConnect.Translucent" />
+
+        <service
+            android:name=".stream.MirrorService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <!-- Contrôle du téléphone depuis le PC pendant le miroir, activé par l'utilisateur. -->
+        <service
+            android:name=".stream.ControlService"
+            android:exported="false"
+            android:label="@string/control_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/control_service" />
+        </service>
+
+        <service
+            android:name=".stream.ClipboardTile"
+            android:exported="true"
+            android:icon="@drawable/ic_stat"
+            android:label="@string/clipboard_tile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".service.ConnectionService"

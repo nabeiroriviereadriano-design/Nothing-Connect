@@ -14,6 +14,11 @@ class Prefs(context: Context) {
         get() = p.getBoolean("share_notifications", true)
         set(v) = p.edit().putBoolean("share_notifications", v).apply()
 
+    /** Copier sur le téléphone le texte copié sur le PC (si le PC l'envoie). */
+    var receiveClipboard: Boolean
+        get() = p.getBoolean("receive_clipboard", true)
+        set(v) = p.edit().putBoolean("receive_clipboard", v).apply()
+
     /** Applications dont les notifications ne sont pas transmises. */
     fun isAppBlocked(pkg: String): Boolean = p.getStringSet("blocked_apps", DEFAULT_BLOCKED)!!.contains(pkg)
 

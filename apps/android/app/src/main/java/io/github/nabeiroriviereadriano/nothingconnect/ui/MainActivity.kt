@@ -143,6 +143,7 @@ private fun HomeScreen(onPair: () -> Unit) {
             }
             Text(
                 when {
+                    pc.id in connected.keys && connected[pc.id]?.startsWith("127.0.0.1") == true -> "Connecté par câble USB"
                     pc.id in connected.keys -> "Connecté en Wi-Fi (${connected[pc.id]?.substringBefore(':')})"
                     pc.id in refused -> "Ce PC a révoqué l'association. Associez-le à nouveau."
                     else -> "Hors ligne, reconnexion automatique dès qu'il est joignable"
@@ -151,6 +152,7 @@ private fun HomeScreen(onPair: () -> Unit) {
             )
         }
     }
+    StreamsPanel(online)
     Permissions()
 }
 

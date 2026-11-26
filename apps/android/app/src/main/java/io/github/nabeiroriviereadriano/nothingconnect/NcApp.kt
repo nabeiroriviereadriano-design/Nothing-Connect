@@ -9,5 +9,6 @@ class NcApp : Application() {
         super.onCreate()
         Notifs.createChannels(this)
         Core.init(this)
+        io.github.nabeiroriviereadriano.nothingconnect.stream.Streams.init(this)
     }
 }

@@ -109,6 +109,7 @@ fun SettingsScreen() {
     val devices by Core.devices.collectAsStateWithLifecycle()
     var service by remember { mutableStateOf(Core.prefs.serviceEnabled) }
     var shareNotifs by remember { mutableStateOf(Core.prefs.shareNotifications) }
+    var clip by remember { mutableStateOf(Core.prefs.receiveClipboard) }
     var updateText by remember { mutableStateOf<String?>(null) }
     var release by remember { mutableStateOf<Updater.Release?>(null) }
     var progress by remember { mutableFloatStateOf(-1f) }
@@ -124,6 +125,10 @@ fun SettingsScreen() {
         SwitchRow("Envoyer les notifications au PC", "Le choix des applications se fait depuis le PC.", shareNotifs) {
             shareNotifs = it
             Core.prefs.shareNotifications = it
+        }
+        SwitchRow("Recevoir le presse-papiers du PC", "Quand le partage du presse-papiers est activé sur le PC, le texte copié sur le PC est copié ici.", clip) {
+            clip = it
+            Core.prefs.receiveClipboard = it
         }
     }
     Panel {

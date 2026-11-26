@@ -2,4 +2,7 @@
 <resources>
     <string name="app_name">NOTHING CONNECT</string>
     <string name="share_label">Envoyer au PC</string>
+    <string name="control_label">NOTHING CONNECT : contrôle depuis le PC</string>
+    <string name="control_description">Permet de toucher, balayer, revenir en arrière et taper du texte sur ce téléphone depuis le PC associé, pendant que son écran s\'affiche sur le PC. Le service agit uniquement sur commande de vos PC associés, sur une connexion chiffrée de bout en bout, et n\'enregistre ni ne transmet le contenu des applications. Désactivez-le à tout moment ici.</string>
+    <string name="clipboard_tile">Presse-papiers → PC</string>
 </resources>

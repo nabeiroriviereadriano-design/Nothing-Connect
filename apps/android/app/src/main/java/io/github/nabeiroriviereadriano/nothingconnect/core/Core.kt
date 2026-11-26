@@ -68,6 +68,8 @@ object Core : EventListener, StreamListener {
     val pairing = MutableStateFlow<PairingUi>(PairingUi.Idle)
     val refused = MutableStateFlow<Set<String>>(emptySet())
     val messages = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    /** Son du PC en cours de lecture sur le téléphone. */
+    val pcAudioOn = MutableStateFlow(false)
 
     /** Abonnés internes (service, notifications, multimédia…). */
     private val listeners = CopyOnWriteArrayList<(JSONObject) -> Unit>()

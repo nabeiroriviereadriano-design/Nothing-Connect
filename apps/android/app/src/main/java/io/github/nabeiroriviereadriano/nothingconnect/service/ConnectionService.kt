@@ -20,6 +20,7 @@ import io.github.nabeiroriviereadriano.nothingconnect.core.Core
 import io.github.nabeiroriviereadriano.nothingconnect.core.Notifs
 import io.github.nabeiroriviereadriano.nothingconnect.notif.MediaWatcher
 import io.github.nabeiroriviereadriano.nothingconnect.notif.NotifListener
+import io.github.nabeiroriviereadriano.nothingconnect.stream.Streams
 import org.json.JSONObject
 
 /**
@@ -66,6 +67,7 @@ class ConnectionService : LifecycleService() {
 
     override fun onDestroy() {
         Core.unsubscribe(listener)
+        Streams.stopPcAudio()
         status?.stop()
         commands?.stopRing()
         runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(netCallback) }
@@ -92,8 +94,19 @@ class ConnectionService : LifecycleService() {
                 NotifListener.instance?.resendActive(peer)
                 MediaWatcher.publish()
             }
-            "peer_disconnected", "device_removed" -> updateText()
-            "request" -> commands?.handle(e.getString("peer_id"), e.getJSONObject("message"))
+            "peer_disconnected", "device_removed" -> {
+                updateText()
+                Streams.onPeerGone(e.getString("peer_id"))
+            }
+            "request" -> {
+                val peer = e.getString("peer_id")
+                val msg = e.getJSONObject("message")
+                if (!Streams.handle(peer, msg)) commands?.handle(peer, msg)
+            }
+            "clipboard" -> if (Core.prefs.receiveClipboard) {
+                // Écrire dans le presse-papiers est permis en arrière-plan.
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("NOTHING CONNECT", e.getString("content")))
+            }
             "transfer_incoming" -> {
                 val i = Core.incoming.value.firstOrNull { it.id == e.getString("id") } ?: return
                 val name = Core.devices.value.firstOrNull { it.id == i.peerId }?.name ?: "Le PC"

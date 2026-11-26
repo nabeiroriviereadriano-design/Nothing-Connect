@@ -27,7 +27,7 @@ $signtool = "$kits\$ver\x64\signtool.exe"
 & $inf2cat /driver:$out /os:10_X64,10_VB_X64,10_NI_X64 /uselocaltime
 if ($LASTEXITCODE -ne 0) { throw "Inf2Cat a échoué" }
 
-$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=NOTHING CONNECT Display Test" -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(5)
+$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=NOTHING CONNECT Display" -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(5)
 $pwd = ConvertTo-SecureString -String ([guid]::NewGuid().ToString()) -Force -AsPlainText
 Export-PfxCertificate -Cert $cert -FilePath "$env:TEMP\nc-test.pfx" -Password $pwd | Out-Null
 Export-Certificate -Cert $cert -FilePath "$out\NcDisplay.cer" | Out-Null
@@ -35,4 +35,7 @@ $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServ
 & $signtool sign /fd sha256 /f "$env:TEMP\nc-test.pfx" /p $plain "$out\NcDisplay.dll" "$out\NcDisplay.cat" "$out\NcDisplaySetup.exe"
 if ($LASTEXITCODE -ne 0) { throw "signature échouée" }
 Remove-Item "$env:TEMP\nc-test.pfx"
+# Clé à usage unique : détruite juste après la signature. Le certificat installé chez
+# l'utilisateur ne peut donc jamais servir à signer autre chose que ce pilote.
+Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -DeleteKey
 Get-ChildItem $out
