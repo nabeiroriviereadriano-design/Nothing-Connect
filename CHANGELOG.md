@@ -1,5 +1,9 @@
 # Notes de version
 
+## 0.2.1
+
+- Écran étendu : le moniteur virtuel prend exactement le format de l'écran du téléphone (l'image remplit tout l'écran) et le toucher tombe au bon endroit, même s'il reste des bandes noires.
+
 ## 0.2.0
 
 - **Miroir de l'écran du téléphone** sur le PC (H.264 matériel, jusqu'à 60 i/s), avec le son, et **contrôle** depuis le PC (clic, appui long, balayage, molette, retour/accueil/applis récentes, saisie de texte).
