@@ -785,6 +785,35 @@ mod win {
     }
 
     /// Règle la définition et la fréquence d'un écran (sans droits administrateur).
+    /// Définition actuelle d'un écran.
+    fn current_mode(name: &[u16; 32]) -> Option<(u32, u32)> {
+        use windows::Win32::Graphics::Gdi::{
+            EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS,
+        };
+        let mut dm = DEVMODEW {
+            dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+            ..Default::default()
+        };
+        unsafe { EnumDisplaySettingsW(PCWSTR(name.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm) }
+            .as_bool()
+            .then_some((dm.dmPelsWidth, dm.dmPelsHeight))
+    }
+
+    /// Impose au moniteur virtuel le format exact du téléphone (sinon l'image n'occupe pas
+    /// tout l'écran du téléphone). Réessaie le temps que Windows publie le mode.
+    fn ensure_mode(name: &[u16; 32], w: u32, h: u32, hz: u32) -> bool {
+        for _ in 0..10 {
+            if current_mode(name) == Some((w, h)) {
+                return true;
+            }
+            set_mode(name, w, h, hz);
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        let got = current_mode(name);
+        tracing::warn!("écran virtuel en {got:?} au lieu de {w}×{h}");
+        got == Some((w, h))
+    }
+
     fn set_mode(name: &[u16; 32], w: u32, h: u32, hz: u32) {
         use windows::Win32::Graphics::Gdi::{
             ChangeDisplaySettingsExW, CDS_UPDATEREGISTRY, DEVMODEW, DM_DISPLAYFREQUENCY,
@@ -1031,16 +1060,21 @@ mod win {
                     let started = Instant::now();
                     let mut mode_set = false;
                     while reader.is_none() && !stop.load(Ordering::SeqCst) {
+                        // Dès que l'écran existe : format exact du téléphone, quel que soit le pilote.
+                        let adapter = match backend {
+                            Backend::Own => ADAPTER_NAME,
+                            Backend::Vdd => vdd::ADAPTER,
+                        };
+                        let name = display_device_name(adapter);
+                        if let (Some(n), false) = (name.as_ref(), mode_set) {
+                            ensure_mode(n, w, h, hz);
+                            mode_set = true;
+                        }
                         reader = match backend {
                             Backend::Own => FrameReader::open().map(Source::Shared),
-                            Backend::Vdd => display_device_name(vdd::ADAPTER).and_then(|name| {
-                                if !mode_set {
-                                    set_mode(&name, w, h, hz);
-                                    mode_set = true;
-                                    std::thread::sleep(Duration::from_millis(500));
-                                }
-                                Duplicator::open(&name).map(|d| Source::Dup(d, name))
-                            }),
+                            Backend::Vdd => {
+                                name.and_then(|n| Duplicator::open(&n).map(|d| Source::Dup(d, n)))
+                            }
                         };
                         if reader.is_none() {
                             if started.elapsed() > Duration::from_secs(20) {
@@ -1051,6 +1085,16 @@ mod win {
                         }
                     }
                     let Some(mut reader) = reader else { return };
+                    if !mode_set {
+                        let adapter = if backend == Backend::Own {
+                            ADAPTER_NAME
+                        } else {
+                            vdd::ADAPTER
+                        };
+                        if let Some(n) = display_device_name(adapter) {
+                            ensure_mode(&n, w, h, hz);
+                        }
+                    }
                     let mut bgra = Vec::new();
                     let mut jpeg = Vec::with_capacity(512 * 1024);
                     let mut last_sent = Instant::now() - Duration::from_secs(10);
@@ -1143,7 +1187,8 @@ mod win {
             };
             let rect = {
                 let mut r = self.rect.lock().unwrap();
-                if r.is_none() {
+                // Recalculé à chaque appui : la définition ou la disposition a pu changer.
+                if r.is_none() || action == PointerAction::Down {
                     *r = monitor_rect(adapter);
                 }
                 *r

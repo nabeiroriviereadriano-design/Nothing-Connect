@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -43,6 +44,8 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
     private var reuse: Bitmap? = null
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val dst = Rect()
+    /** Zone où l'image du PC est réellement dessinée (le toucher est calculé dedans). */
+    @Volatile private var image = RectF()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -128,6 +131,8 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
                     dst.set((canvas.width - w) / 2, (canvas.height - h) / 2, (canvas.width + w) / 2, (canvas.height + h) / 2)
                     canvas.drawColor(Color.BLACK)
                     canvas.drawBitmap(bmp, null, dst, paint)
+                    // Le canevas couvre toute la vue : mêmes coordonnées que le toucher.
+                    image = RectF(dst)
                 } finally {
                     holder.unlockCanvasAndPost(canvas)
                 }
@@ -139,11 +144,14 @@ class DisplayActivity : ComponentActivity(), SurfaceHolder.Callback {
     }
 
     private fun onTouch(e: MotionEvent) {
-        val w = view.width.toFloat().coerceAtLeast(1f)
-        val h = view.height.toFloat().coerceAtLeast(1f)
+        // Si l'image du PC n'a pas exactement le format de l'écran (bandes noires), les
+        // coordonnées sont rapportées à l'image affichée, pas à tout l'écran.
+        val r = image.takeIf { it.width() > 1f && it.height() > 1f } ?: RectF(0f, 0f, view.width.toFloat(), view.height.toFloat())
         fun send(action: String, i: Int) {
+            val x = ((e.getX(i) - r.left) / r.width().coerceAtLeast(1f)).coerceIn(0f, 1f)
+            val y = ((e.getY(i) - r.top) / r.height().coerceAtLeast(1f)).coerceIn(0f, 1f)
             Core.send(peer, JSONObject().put("t", "display_pointer").put("action", action).put("pointer", e.getPointerId(i))
-                .put("x", (e.getX(i) / w).coerceIn(0f, 1f).toDouble()).put("y", (e.getY(i) / h).coerceIn(0f, 1f).toDouble()))
+                .put("x", x.toDouble()).put("y", y.toDouble()))
         }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> send("down", e.actionIndex)
