@@ -40,3 +40,9 @@ lto = "thin"
 codegen-units = 1
 strip = true
 panic = "unwind"
+
+# Liaisons Windows (Media Foundation, Direct3D…) : des centaines de milliers de fonctions
+# d'appel système. En un seul bloc optimisé, la compilation sature la mémoire de la CI.
+[profile.release.package.windows]
+opt-level = 1
+codegen-units = 64

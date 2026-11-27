@@ -165,9 +165,7 @@ class ConnectionService : LifecycleService() {
         fun stop(ctx: Context) {
             ctx.stopService(Intent(ctx, ConnectionService::class.java))
         }
-    }
 
-    companion object {
         private const val USB_STATE = "android.hardware.usb.action.USB_STATE"
     }
 }

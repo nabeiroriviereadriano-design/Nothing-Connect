@@ -51,10 +51,10 @@ jobs:
       - name: Pilote d'écran étendu (IddCx) et outil d'installation
         shell: pwsh
         run: ./native/windows/display-driver/build-driver.ps1
-      - name: Compilation de l'application
-        run: cargo build --release -p nothing-connect-windows
       - name: Tests de l'application
         run: cargo test -p nothing-connect-windows
+      - name: Compilation de l'application
+        run: cargo build --release -p nothing-connect-windows
       - uses: actions/upload-artifact@v4
         with:
           name: pilote-ecran-ncdisplay

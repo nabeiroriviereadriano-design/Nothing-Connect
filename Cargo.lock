@@ -3069,7 +3069,7 @@ dependencies = [
 
 [[package]]
 name = "nc-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "hex",
  "nc-pairing",
@@ -3090,7 +3090,7 @@ dependencies = [
 
 [[package]]
 name = "nc-ffi"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "android_logger",
  "log",
@@ -3104,7 +3104,7 @@ dependencies = [
 
 [[package]]
 name = "nc-pairing"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "hkdf",
  "rand 0.8.8",
@@ -3115,7 +3115,7 @@ dependencies = [
 
 [[package]]
 name = "nc-protocol"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3125,7 +3125,7 @@ dependencies = [
 
 [[package]]
 name = "nc-security"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "hex",
  "keyring",
@@ -3137,7 +3137,7 @@ dependencies = [
 
 [[package]]
 name = "nc-storage"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "hex",
  "nc-protocol",
@@ -3151,7 +3151,7 @@ dependencies = [
 
 [[package]]
 name = "nc-transfer"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "hex",
  "nc-protocol",
@@ -3165,7 +3165,7 @@ dependencies = [
 
 [[package]]
 name = "nc-transport"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "mdns-sd",
  "nc-pairing",
@@ -3279,7 +3279,7 @@ dependencies = [
 
 [[package]]
 name = "nothing-connect-windows"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "arboard",
  "cpal",
