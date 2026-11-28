@@ -934,12 +934,13 @@ mod win {
     }
 
     fn setup_exe(app: &AppHandle) -> Option<PathBuf> {
-        let p = app
-            .path()
-            .resource_dir()
-            .ok()?
-            .join("driver")
-            .join("NcDisplaySetup.exe");
+        let dir = app.path().resource_dir().ok()?.join("driver");
+        let p = dir.join("NcDisplaySetup.exe");
+        // Mis de côté par un installateur pendant une mise à niveau puis interrompu.
+        let kept = dir.join("NcDisplaySetup.exe.keep");
+        if !p.is_file() && kept.is_file() {
+            let _ = std::fs::rename(&kept, &p);
+        }
         p.is_file().then_some(p)
     }
 

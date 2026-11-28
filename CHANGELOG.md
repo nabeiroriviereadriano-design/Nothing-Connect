@@ -1,5 +1,9 @@
 # Notes de version
 
+## 0.5.1
+
+- **Le pilote d'écran étendu n'est plus à réinstaller après une mise à jour.** Lancé par-dessus une version installée, l'installateur proposait « Désinstaller avant d'installer » (choix par défaut) et l'ancien désinstalleur retirait alors le pilote, la règle du pare-feu, les outils USB et le démarrage automatique. L'installateur garde maintenant tout cela, comme la mise à jour depuis l'application. La désinstallation depuis les Paramètres Windows retire toujours tout.
+
 ## 0.5.0
 
 - **Encodage vidéo par la carte graphique** (NVIDIA, AMD, Intel via Media Foundation) pour l'écran étendu : beaucoup moins de charge processeur et moins de latence. Si la carte n'en propose pas ou échoue, retour automatique à l'encodeur logiciel ; réglage « Encodage » (Carte graphique / Processeur) et encodeur utilisé affiché dans les mesures.

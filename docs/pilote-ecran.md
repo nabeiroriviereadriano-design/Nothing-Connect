@@ -15,6 +15,9 @@ deux pilotes ; la page **Écran étendu** de l'application installe l'un ou l'au
   sert à signer le pilote, puis est **détruite**. Le certificat ajouté au PC ne peut donc rien
   signer d'autre. Il est retiré avec le pilote (bouton « Retirer le pilote » ou désinstallation
   de NOTHING CONNECT).
+- Mises à jour : le pilote est conservé, que la mise à jour vienne de l'application ou d'un
+  nouvel installateur lancé par-dessus (même avec « Désinstaller avant d'installer »). Avant la
+  0.5.1, ce second cas le retirait et il fallait le réinstaller.
 - Fonctionnement : le moniteur n'existe que pendant une session. Le téléphone annonce la taille
   de son écran, le pilote crée un moniteur de cette taille, l'image passe par une mémoire
   partagée locale puis est compressée en JPEG vers le téléphone. Le toucher sur le téléphone
